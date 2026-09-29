@@ -95,8 +95,27 @@ public class VillagerChatter implements ModInitializer {
 				handler.player.sendSystemMessage(tag().append(Component.literal("Villager AI is " + rt.status() + "…")));
 			}
 		});
+		// Remember who was asleep right before a hit: damage wakes villagers before AFTER_DAMAGE fires.
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+			if (entity instanceof Villager v && v.isSleeping()) wokenAt.put(v.getUUID(), v.level().getGameTime());
+			return true;
+		});
 		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamage, damageTaken, blocked) -> {
-			if (!blocked && entity instanceof Villager v && source.getEntity() instanceof ServerPlayer p) onHit(p, v);
+			if (!(entity instanceof Villager v)) return;
+			Long woke = wokenAt.remove(v.getUUID());
+			boolean wasAsleep = woke != null && woke == v.level().getGameTime();
+			if (!blocked && source.getEntity() instanceof ServerPlayer p) {
+				if (wasAsleep) onWoken(p, v); else onHit(p, v);
+			}
+		});
+		// Jobless villagers, nitwits and kids have no trade screen; give them a line instead of just a head shake.
+		net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+			if (hand == net.minecraft.world.InteractionHand.MAIN_HAND && world instanceof ServerLevel level
+					&& entity instanceof Villager v && player instanceof ServerPlayer
+					&& !v.isSleeping() && !v.isTrading() && hit == null) {
+				onChatWithoutTrades(level, v);
+			}
+			return net.minecraft.world.InteractionResult.PASS;
 		});
 		// Clean up any bubble left behind in a saved world (e.g. the game closed mid-sentence).
 		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
@@ -282,6 +301,8 @@ public class VillagerChatter implements ModInitializer {
 	private final java.util.Map<net.minecraft.world.entity.raid.Raid, Boolean> raidsSeen = new java.util.WeakHashMap<>();
 
 	/** Make a villager react to an event right away (skips the ambient cooldowns, but not spam protection). */
+	private final Map<UUID, Long> wokenAt = new java.util.HashMap<>();
+
 	public void speakEvent(ServerLevel level, Villager v, String event, List<String> fallbacks, byte particle) {
 		if (!v.isAlive()) return;
 		long now = level.getGameTime();
@@ -367,6 +388,30 @@ public class VillagerChatter implements ModInitializer {
 	}
 
 	/** A player hit a villager: remember it, and react right away (skips the normal cooldown). */
+	/** Punched awake: grumpy, but it doesn't count as an attack. */
+	private void onWoken(ServerPlayer player, Villager v) {
+		ServerLevel level = (ServerLevel) v.level();
+		long now = level.getGameTime();
+		if (now < lastOuch.getOrDefault(v.getUUID(), 0L) || !v.isAlive()) return;
+		lastOuch.put(v.getUUID(), now + 40);
+		String line = ChatterLines.WOKEN.get(level.getRandom().nextInt(ChatterLines.WOKEN.size()));
+		if (config.showBubbles) bubbles.show(level, v, line);
+		else player.sendSystemMessage(Component.literal("<Villager> ").withStyle(ChatFormatting.GREEN).append(Component.literal(line)));
+		if (config.particles) level.broadcastEntityEvent(v, EntityEvent.VILLAGER_SWEAT);
+		villagerNextTalk.put(v.getUUID(), now + 20L * config.villagerCooldownSeconds);
+	}
+
+	private void onChatWithoutTrades(ServerLevel level, Villager v) {
+		String prof = ChatterLines.shortName(v.getVillagerData().profession().getRegisteredName());
+		if (v.isBaby()) {
+			speakEvent(level, v, "A player walked up to talk to you. You're a little kid villager.", ChatterLines.BABY, EntityEvent.VILLAGER_HAPPY);
+		} else if (prof.equals("nitwit")) {
+			speakEvent(level, v, "A player walked up to chat. You're a nitwit: friendly but clueless, with no job and nothing to sell.", ChatterLines.NITWIT_CHAT, EntityEvent.VILLAGER_HAPPY);
+		} else if (prof.equals("none")) {
+			speakEvent(level, v, "A player walked up to trade, but you have no job yet, so nothing to sell. You're looking for a workstation.", ChatterLines.JOBLESS_CHAT, EntityEvent.VILLAGER_HAPPY);
+		}
+	}
+
 	private void onHit(ServerPlayer player, Villager v) {
 		VillagerMemory.update(v, player, VillagerMemory.Rel::withHit);
 		ServerLevel level = (ServerLevel) v.level();

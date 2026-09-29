@@ -8,7 +8,8 @@
 - **They know their shop.** Conversations use the villager's real trades ("I'll take 32 rotten flesh for one emerald").
 - **They remember you.** Trades, hits, and vanilla reputation are saved per villager. Regulars get greeted like friends; hit one and it holds a grudge.
 - **Trade reactions.** Finish a trade mid-conversation and the villager comments on it.
-- **Instant reactions.** Punch a villager and hear about it right away.
+- **Instant reactions.** Punch a villager and hear about it right away. Punch one awake and it's just grumpy, not holding a grudge.
+- **Jobless villagers talk too.** Nitwits, unemployed villagers and kids have nothing to trade, so right-clicking them gets a line instead of just a head shake.
 - **World reactions.** Villagers panic when a raid starts, celebrate (or mourn) when it ends, react when someone rings the village bell, and mutter a goodnight as they climb into bed.
 - **Villager small talk.** Two villagers standing together sometimes have a short overheard exchange, and they look at each other while they talk.
 - **Always works.** If the AI is off, loading, or says something strange, villagers fall back to hand-written lines.

@@ -96,7 +96,7 @@ public final class ChatterLines {
 		return pool.get(random.nextInt(pool.size()));
 	}
 
-	private static String shortName(String id) {
+	static String shortName(String id) {
 		return id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
 	}
 
@@ -115,7 +115,7 @@ public final class ChatterLines {
 			"I heard the zombies have been getting braver lately."
 	);
 
-	private static final List<String> BABY = List.of(
+	static final List<String> BABY = List.of(
 			"Hi! Hi! HI!",
 			"Wanna play tag? You're it!",
 			"My dad says I can be a librarian when I grow up.",
@@ -146,6 +146,15 @@ public final class ChatterLines {
 			"The bell! What happened?", "Who's ringing that? I was busy.", "Hrmm? Trouble?", "Everybody inside!");
 	public static final List<String> BEDTIME = List.of(
 			"Goodnight. Don't steal my bed.", "Zzz... hrmm...", "Finally, sleep.", "Wake me if the zombies knock.");
+
+	public static final List<String> WOKEN = List.of(
+			"Hrmm?! I was SLEEPING.", "Wha-- is it morning already?", "Five more minutes...", "Did you really have to wake me?");
+
+	public static final List<String> NITWIT_CHAT = List.of(
+			"Hello! I don't do anything, but I'm great at it.", "Hrmm? Oh, hi! Nice day for standing around.", "Trade? I've got nothing. Not even ideas.");
+
+	public static final List<String> JOBLESS_CHAT = List.of(
+			"Sorry, no job yet. Seen a spare workstation?", "Nothing to sell until I find work.", "Hire me! Well, give me a lectern or something.");
 
 	public static final List<String> OUCH = List.of(
 			"OW! What was that for?!",
