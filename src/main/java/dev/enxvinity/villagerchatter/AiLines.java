@@ -17,7 +17,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Asks a small language model (running in Ollama on this computer) for a villager line.
+ * Asks a small language model for villager lines. Two backends:
+ *  - "builtin" (default): {@link LocalRuntime} runs llama.cpp's llama-server inside the mod, no setup needed.
+ *  - "ollama": talks to an Ollama install on this computer.
  *
  * Everything here runs OFF the game thread: {@link #requestLine} returns immediately with a
  * CompletableFuture, and the game picks the answer up on a later tick. If the model is slow,
@@ -45,6 +47,64 @@ public final class AiLines {
 
 	private final ChatterConfig config;
 	private final HttpClient http;
+	private final LocalRuntime runtime = new LocalRuntime();
+
+	private boolean builtin() {
+		return !"ollama".equalsIgnoreCase(config.backend);
+	}
+
+	/** Same shape whichever backend answered: status code + a body with {"message":{"content":...}}. */
+	private record Resp(int statusCode, String body) {}
+
+	/**
+	 * Sends an Ollama-style chat body to whichever backend is active. For the built-in server the body is
+	 * translated to the OpenAI-style API llama-server speaks, and the answer translated back.
+	 */
+	private CompletableFuture<Resp> chat(JsonObject body, Duration timeout) {
+		if (!builtin()) {
+			HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
+					.timeout(timeout)
+					.header("Content-Type", "application/json")
+					.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+					.build();
+			return http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(r -> new Resp(r.statusCode(), r.body()));
+		}
+		JsonObject oa = new JsonObject();
+		oa.add("messages", body.get("messages"));
+		JsonObject opt = body.has("options") ? body.getAsJsonObject("options") : new JsonObject();
+		if (opt.has("temperature")) oa.add("temperature", opt.get("temperature"));
+		if (opt.has("top_p")) oa.add("top_p", opt.get("top_p"));
+		if (opt.has("repeat_penalty")) oa.add("repeat_penalty", opt.get("repeat_penalty"));
+		if (opt.has("num_predict")) oa.add("max_tokens", opt.get("num_predict"));
+		if (body.has("format")) {
+			JsonObject schema = new JsonObject();
+			schema.addProperty("name", "villager");
+			schema.add("schema", body.get("format"));
+			JsonObject rf = new JsonObject();
+			rf.addProperty("type", "json_schema");
+			rf.add("json_schema", schema);
+			oa.add("response_format", rf);
+		}
+		HttpRequest req = HttpRequest.newBuilder(URI.create(runtime.baseUrl() + "/v1/chat/completions"))
+				.timeout(timeout)
+				.header("Content-Type", "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString(oa.toString()))
+				.build();
+		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(r -> {
+			if (r.statusCode() != 200) return new Resp(r.statusCode(), r.body());
+			String content = JsonParser.parseString(r.body()).getAsJsonObject().getAsJsonArray("choices")
+					.get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString();
+			JsonObject message = new JsonObject();
+			message.addProperty("content", content);
+			JsonObject wrapped = new JsonObject();
+			wrapped.add("message", message);
+			return new Resp(200, wrapped.toString());
+		});
+	}
+
+	public LocalRuntime runtime() {
+		return runtime;
+	}
 	/** If Ollama isn't reachable, stop asking for a minute instead of spamming it. */
 	private volatile long offlineUntilMs = 0;
 	private volatile boolean warnedOffline = false;
@@ -76,7 +136,9 @@ public final class AiLines {
 	}
 
 	public boolean available() {
-		return config.aiEnabled && System.currentTimeMillis() >= offlineUntilMs;
+		if (!config.aiEnabled) return false;
+		if (builtin()) return runtime.ready();
+		return System.currentTimeMillis() >= offlineUntilMs;
 	}
 
 	public CompletableFuture<Optional<String>> requestLine(ChatterLines.Situation s) {
@@ -99,13 +161,7 @@ public final class AiLines {
 		options.addProperty("repeat_penalty", 1.15);
 		body.add("options", options);
 
-		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
-				.timeout(Duration.ofMillis(config.aiTimeoutMs))
-				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-				.build();
-
-		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+		return chat(body, Duration.ofMillis(config.aiTimeoutMs))
 				.thenApply(resp -> {
 					if (resp.statusCode() != 200) {
 						VillagerChatter.LOGGER.warn("Ollama returned HTTP {}: {}", resp.statusCode(), resp.body());
@@ -140,6 +196,10 @@ public final class AiLines {
 	 */
 	public void warmUp() {
 		if (!config.aiEnabled) return;
+		if (builtin()) {
+			runtime.startAsync();
+			return;
+		}
 		JsonObject body = baseBody();
 		body.remove("stream");
 		body.add("options", baseOptions(0.1, 1));
@@ -282,13 +342,7 @@ public final class AiLines {
 
 		body.add("options", baseOptions(temperature, 220));
 
-		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
-				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
-				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-				.build();
-
-		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+		return chat(body, Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
 				.thenApply(resp -> {
 					if (resp.statusCode() != 200) return Optional.<Turn>empty();
 					String content = JsonParser.parseString(resp.body()).getAsJsonObject()
@@ -361,12 +415,7 @@ public final class AiLines {
 		body.add("messages", messages);
 		body.add("options", baseOptions(0.9, 200));
 
-		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
-				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
-				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-				.build();
-		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+		return chat(body, Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
 				.thenApply(resp -> {
 					if (resp.statusCode() != 200) return Optional.<List<TalkLine>>empty();
 					String content = JsonParser.parseString(resp.body()).getAsJsonObject()

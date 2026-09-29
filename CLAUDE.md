@@ -26,6 +26,12 @@ Villagers say short, situation-aware lines when a player is near. Hand-written l
 - `ServerLivingEntityEvents.AFTER_DAMAGE` — instant hand-written OUCH bubble, angry particles, hit remembered.
 - Small talk: `AiLines.requestSmallTalk` (JSON lines A/B) scheduled as alternating bubbles in `VillagerChatter.runScenes`; villagers look at each other.
 
+## v0.7–0.8
+- Model: Qwen3-4B (see DESIGN.md §6 for the comparison). All requests use JSON-schema output.
+- `LocalRuntime.java` — built-in backend: downloads pinned llama.cpp release (b11242) for the OS + Qwen3-4B-Q4_K_M.gguf from HF, verifies SHA-256, unpacks with `tar`, runs `llama-server --reasoning off -c 4096 -np 2 -ngl 99` on a random 127.0.0.1 port, PID file to clean up after crashes. Win/Linux x64 try Vulkan build then CPU build.
+- `AiLines.chat()` translates Ollama-style bodies to llama-server's OpenAI API (`response_format: json_schema`) and back, so request code is backend-agnostic. `config.backend` = builtin | ollama.
+- Tested: all three request types against a source-built llama-server b11242 (official Linux binaries need glibc 2.38; the VM has 2.35).
+
 ## Commands
 - Build: `./gradlew build` → `build/libs/villagerchatter-<version>.jar`
 - Test in game: `./gradlew runClient`

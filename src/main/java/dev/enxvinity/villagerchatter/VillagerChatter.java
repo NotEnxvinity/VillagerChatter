@@ -3,6 +3,9 @@ package dev.enxvinity.villagerchatter;
 import dev.enxvinity.villagerchatter.net.DialogueChoiceC2S;
 import dev.enxvinity.villagerchatter.net.DialogueStateS2C;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.server.MinecraftServer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -82,6 +85,16 @@ public class VillagerChatter implements ModInitializer {
 		LOGGER.info("Villager Chatter loaded — AI {} (model {}).",
 				config.aiEnabled ? "on" : "off", config.model);
 		ServerTickEvents.END_LEVEL_TICK.register(this::onLevelTick);
+		ServerLifecycleEvents.SERVER_STARTED.register(s -> server = s);
+		ServerLifecycleEvents.SERVER_STOPPED.register(s -> server = null);
+		// Tell players joining while the AI is still downloading why villagers sound simple.
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, srv) -> {
+			LocalRuntime rt = ai.runtime();
+			if (config.aiEnabled && !"ollama".equalsIgnoreCase(config.backend)
+					&& (rt.state() == LocalRuntime.State.DOWNLOADING || rt.state() == LocalRuntime.State.STARTING)) {
+				handler.player.sendSystemMessage(tag().append(Component.literal("Villager AI is " + rt.status() + "…")));
+			}
+		});
 		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamage, damageTaken, blocked) -> {
 			if (!blocked && entity instanceof Villager v && source.getEntity() instanceof ServerPlayer p) onHit(p, v);
 		});
@@ -246,6 +259,20 @@ public class VillagerChatter implements ModInitializer {
 
 	private static String capitalize(String s) {
 		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+	}
+
+	private volatile MinecraftServer server;
+
+	private static net.minecraft.network.chat.MutableComponent tag() {
+		return Component.literal("[Villager Chatter] ").withStyle(ChatFormatting.GOLD);
+	}
+
+	/** Short status message to everyone in the world (e.g. "AI ready"). Safe to call from any thread. */
+	public void announce(String text) {
+		MinecraftServer s = server;
+		if (s == null) return;
+		s.execute(() -> s.getPlayerList().getPlayers().forEach(p ->
+				p.sendSystemMessage(tag().append(Component.literal(text).withStyle(ChatFormatting.GRAY)))));
 	}
 
 	/** A player hit a villager: remember it, and react right away (skips the normal cooldown). */

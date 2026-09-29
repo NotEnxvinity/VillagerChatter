@@ -12,7 +12,8 @@ A Fabric mod for Minecraft 26.3 where villagers say random, situation-aware line
 - [x] v0.5 — Villager memory (trades, hits, last thing said; persists), trade reactions, instant hit reactions
 - [x] v0.6 — Villagers chat with each other (overheard 2–4 line exchanges)
 - [x] v0.7 — Switched to qwen3:4b (much better dialogue), JSON output everywhere, 2k context (less RAM), auto-download of the model
-- [ ] Stage 5 — Bundle the model inside the mod (java-llama.cpp)
+- [x] v0.8 — Built-in AI: mod downloads and runs llama.cpp + Qwen3-4B itself; Ollama optional
+- [ ] In-game settings screen, Modrinth page
 
 ## First-time setup (Mac)
 1. Install **JDK 25** (Temurin: https://adoptium.net) and **IntelliJ IDEA Community**.
@@ -22,13 +23,19 @@ A Fabric mod for Minecraft 26.3 where villagers say random, situation-aware line
 4. Gradle panel (elephant icon, right side) → Tasks → fabric → **runClient**.
 5. Make a creative world, find a village, and walk up to villagers. Lines show up in chat.
 
-## Turning on the AI
-1. Install Ollama for Mac (https://ollama.com/download) and open it once.
-2. The mod downloads its model (`qwen3:4b`, ~2.5 GB) through Ollama automatically on first launch. (Or run `ollama pull qwen3:4b` yourself.)
-3. Launch the game. Settings live in `.minecraft/config/villagerchatter.properties` (in Prism: instance → Folder → config).
-   Set `aiEnabled=false` for hand-written lines only, or `model=smollm2:360m` for the tinier model.
-   Other switches: `showBubbles`, `showInChat`, `particles`, `dialogueEnabled`, `smallTalkChance`.
-4. The game log shows `[AI]` or `[hand-written]` next to each line so you can tell which is which.
+## The AI (no setup needed)
+Since v0.8 the mod runs its own AI. On first launch it downloads, into `.minecraft/villagerchatter/`:
+- llama.cpp's `llama-server` for your OS (official GitHub release, pinned build b11242, ~12–35 MB)
+- the Qwen3-4B model (`Qwen3-4B-Q4_K_M.gguf`, official Qwen Hugging Face page, ~2.5 GB)
+
+Both are checked against pinned SHA-256 hashes. Villagers use hand-written lines until it's ready; you'll get a chat message when it is.
+The server only listens on 127.0.0.1 and stops when the game closes. Log: `villagerchatter/llama-server.log`.
+
+Settings live in `.minecraft/config/villagerchatter.properties` (in Prism: instance → Folder → config).
+- `backend=builtin` (default) or `backend=ollama` to use an Ollama install instead (`model=` picks the Ollama model)
+- `aiEnabled=false` for hand-written lines only
+- Other switches: `showBubbles`, `showInChat`, `particles`, `dialogueEnabled`, `smallTalkChance`.
+- The game log shows `[AI]` or `[hand-written]` next to each line.
 
 ## Where to tinker
 - `ChatterLines.java` — what villagers know (`Situation`) + hand-written fallback lines.
