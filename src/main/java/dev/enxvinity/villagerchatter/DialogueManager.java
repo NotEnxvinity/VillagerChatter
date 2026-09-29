@@ -48,6 +48,7 @@ public final class DialogueManager {
 		long lastActive;
 		long lastGreeting = Long.MIN_VALUE / 2;
 		long lastChoice = Long.MIN_VALUE / 2;
+		long lastTradeReaction = Long.MIN_VALUE / 2;
 		String opener = "The player just opened your trades.";
 
 		Conversation(UUID villagerId) { this.villagerId = villagerId; }
@@ -99,7 +100,7 @@ public final class DialogueManager {
 		boolean returning = !conv.history.isEmpty();
 		conv.opener = returning ? "The player came back and opened your trades again." : "The player just opened your trades.";
 		String fallback = ChatterLines.pick(s, level.getRandom());
-		generate(player, villager, conv, context(s, villager), conv.opener, fallback);
+		generate(player, villager, conv, context(s, villager, player), conv.opener, fallback);
 	}
 
 	private void onChoice(ServerPlayer player, int index) {
@@ -126,7 +127,7 @@ public final class DialogueManager {
 		conv.history.add(new AiLines.Said(false, said, List.of()));
 		ChatterLines.Situation s = ChatterLines.describe(level, villager, player);
 		String fallback = ChatterLines.pick(s, level.getRandom());
-		generate(player, villager, conv, context(s, villager), conv.opener, fallback);
+		generate(player, villager, conv, context(s, villager, player), conv.opener, fallback);
 	}
 
 	private void generate(ServerPlayer player, Villager villager, Conversation conv, String scene, String event, String fallbackLine) {
@@ -147,6 +148,7 @@ public final class DialogueManager {
 			conv.replies = replies;
 			conv.thinking = false;
 			conv.history.add(new AiLines.Said(true, turn.line(), replies));
+			if (villager.isAlive()) VillagerMemory.update(villager, player, r -> r.withLast(turn.line()));
 			while (conv.history.size() > MAX_HISTORY) conv.history.remove(0);
 			VillagerChatter.LOGGER.info("[dialogue] <{}> {} | replies: {}", conv.speaker, conv.line, replies);
 
@@ -173,19 +175,12 @@ public final class DialogueManager {
 	}
 
 	/** Who the villager is, what it sells, and what's going on — the AI's "scene". */
-	private static String context(ChatterLines.Situation s, Villager villager) {
+	private static String context(ChatterLines.Situation s, Villager villager, ServerPlayer player) {
 		// Describe real trades from the villager's point of view, e.g.
 		// "You buy 20 Wheat for 1 Emerald. You sell 6 Bread for 1 Emerald."
 		List<String> trades = new ArrayList<>();
 		for (MerchantOffer offer : villager.getOffers()) {
-			var cost = offer.getCostA();
-			var costB = offer.getCostB();
-			var result = offer.getResult();
-			String costText = cost.getCount() + " " + cost.getHoverName().getString()
-					+ (costB.isEmpty() ? "" : " and " + costB.getCount() + " " + costB.getHoverName().getString());
-			String t = result.getItem() == Items.EMERALD
-					? "You buy " + costText + " for " + result.getCount() + " Emerald"
-					: "You sell " + result.getCount() + " " + result.getHoverName().getString() + " for " + costText;
+			String t = tradeText(offer);
 			trades.add(t + (offer.isOutOfStock() ? " (sold out)" : ""));
 			if (trades.size() >= 4) break;
 		}
@@ -197,7 +192,36 @@ public final class DialogueManager {
 		sb.append("Weather: ").append(s.thundering() ? "thunderstorm" : s.raining() ? "raining" : "clear").append(".");
 		if (s.raid()) sb.append(" The village is being raided!");
 		if (s.playerHurt()) sb.append(" The player is badly hurt.");
+		sb.append(" ").append(VillagerMemory.describe(villager, player));
 		return sb.toString();
+	}
+
+	/** "You buy 20 Wheat for 1 Emerald" / "You sell 6 Bread for 1 Emerald" (villager's point of view). */
+	public static String tradeText(MerchantOffer offer) {
+		var cost = offer.getCostA();
+		var costB = offer.getCostB();
+		var result = offer.getResult();
+		String costText = cost.getCount() + " " + cost.getHoverName().getString()
+				+ (costB.isEmpty() ? "" : " and " + costB.getCount() + " " + costB.getHoverName().getString());
+		return result.getItem() == Items.EMERALD
+				? "You buy " + costText + " for " + result.getCount() + " Emerald"
+				: "You sell " + result.getCount() + " " + result.getHoverName().getString() + " for " + costText;
+	}
+
+	/** A trade just completed while the screen is open: have the villager react (at most every 5 s). */
+	public void onTraded(ServerPlayer player, Villager villager, MerchantOffer offer) {
+		String key = activeByPlayer.get(player.getUUID());
+		Conversation conv = key == null ? null : conversations.get(key);
+		if (conv == null || conv.villager != villager || conv.thinking) return;
+		ServerLevel level = (ServerLevel) villager.level();
+		long now = level.getGameTime();
+		if (now - conv.lastTradeReaction < 100) return;
+		conv.lastTradeReaction = now;
+		conv.lastActive = now;
+		String what = tradeText(offer).replace("You buy ", "you bought ").replace("You sell ", "you sold ");
+		conv.history.add(new AiLines.Said(false, "[The player just completed a trade: " + what + ". React to it.]", List.of()));
+		ChatterLines.Situation s = ChatterLines.describe(level, villager, player);
+		generate(player, villager, conv, context(s, villager, player), conv.opener, "Pleasure doing business!");
 	}
 
 	private static void send(ServerPlayer player, Conversation conv) {

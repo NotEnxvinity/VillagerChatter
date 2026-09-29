@@ -28,7 +28,8 @@ public final class ChatterLines {
 			boolean raid,
 			boolean monsterNearby,
 			boolean villagerHurt,
-			boolean playerHurt
+			boolean playerHurt,
+			String relationship
 	) {
 		/** The prompt the AI sees, e.g. "Job: farmer. Biome: desert. Time: day. Weather: clear. A player walked up." */
 		public String toPrompt() {
@@ -42,6 +43,7 @@ public final class ChatterLines {
 			if (villagerHurt) sb.append("You were just hurt. ");
 			if (playerHurt) sb.append("The player nearby is badly hurt.");
 			else sb.append("A player walked up.");
+			if (!relationship.isEmpty()) sb.append(" ").append(relationship);
 			return sb.toString();
 		}
 	}
@@ -66,7 +68,8 @@ public final class ChatterLines {
 				level.isRaided(villager.blockPosition()),
 				monsterNearby,
 				villager.getHealth() < villager.getMaxHealth(),
-				player.getHealth() < player.getMaxHealth() * 0.5f
+				player.getHealth() < player.getMaxHealth() * 0.5f,
+				VillagerMemory.describe(villager, player)
 		);
 	}
 
@@ -123,6 +126,15 @@ public final class ChatterLines {
 			"Hrmm! HRMM! Something's out there!",
 			"Where's that iron golem when you need him?",
 			"I'm hiding. You didn't see me."
+	);
+
+	public static final List<String> OUCH = List.of(
+			"OW! What was that for?!",
+			"Hey! I'm telling the iron golem!",
+			"Hrmm! HRMM!!",
+			"Rude. Very rude.",
+			"Is this how you treat all your merchants?",
+			"I'll remember that, you know."
 	);
 
 	private static final List<String> HURT = List.of(

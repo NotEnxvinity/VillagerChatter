@@ -3,6 +3,8 @@ package dev.enxvinity.villagerchatter;
 import dev.enxvinity.villagerchatter.net.DialogueChoiceC2S;
 import dev.enxvinity.villagerchatter.net.DialogueStateS2C;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.minecraft.world.item.trading.MerchantOffer;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -45,6 +47,7 @@ public class VillagerChatter implements ModInitializer {
 
 	private final Map<UUID, Long> villagerNextTalk = new HashMap<>();
 	private final Map<UUID, Long> playerNextHear = new HashMap<>();
+	private final Map<UUID, Long> lastOuch = new HashMap<>();
 	private final Queue<Delivery> ready = new ConcurrentLinkedQueue<>();
 	private final AtomicInteger inFlight = new AtomicInteger();
 	/** Players waiting on an AI line (so a slow reply can't stack up with the next one). */
@@ -55,13 +58,21 @@ public class VillagerChatter implements ModInitializer {
 	private final SpeechBubbles bubbles = new SpeechBubbles();
 	private static DialogueManager dialogue;
 
+	private static VillagerChatter instance;
+
+	public static VillagerChatter instance() {
+		return instance;
+	}
+
 	public static DialogueManager dialogue() {
 		return dialogue;
 	}
 
 	@Override
 	public void onInitialize() {
+		instance = this;
 		config = ChatterConfig.load();
+		VillagerMemory.init();
 		ai = new AiLines(config);
 		ai.warmUp();
 		PayloadTypeRegistry.clientboundPlay().register(DialogueStateS2C.TYPE, DialogueStateS2C.CODEC);
@@ -71,6 +82,9 @@ public class VillagerChatter implements ModInitializer {
 		LOGGER.info("Villager Chatter loaded — AI {} (model {}).",
 				config.aiEnabled ? "on" : "off", config.model);
 		ServerTickEvents.END_LEVEL_TICK.register(this::onLevelTick);
+		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamage, damageTaken, blocked) -> {
+			if (!blocked && entity instanceof Villager v && source.getEntity() instanceof ServerPlayer p) onHit(p, v);
+		});
 		// Clean up any bubble left behind in a saved world (e.g. the game closed mid-sentence).
 		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
 			if (entity instanceof Display.TextDisplay td && td.entityTags().contains(SpeechBubbles.TAG) && !bubbles.isOurs(td)) {
@@ -153,6 +167,27 @@ public class VillagerChatter implements ModInitializer {
 			if (config.particles && v.isAlive()) playMood(level, v, d.situation());
 			LOGGER.info("[{}] <{}> {}", d.fromAi() ? "AI" : "hand-written", name, d.line());
 		}
+	}
+
+	/** A player hit a villager: remember it, and react right away (skips the normal cooldown). */
+	private void onHit(ServerPlayer player, Villager v) {
+		VillagerMemory.update(v, player, VillagerMemory.Rel::withHit);
+		ServerLevel level = (ServerLevel) v.level();
+		long now = level.getGameTime();
+		if (now < lastOuch.getOrDefault(v.getUUID(), 0L) || !v.isAlive()) return;
+		lastOuch.put(v.getUUID(), now + 40);
+		String line = ChatterLines.OUCH.get(level.getRandom().nextInt(ChatterLines.OUCH.size()));
+		if (config.showBubbles) bubbles.show(level, v, line);
+		else player.sendSystemMessage(Component.literal("<Villager> ").withStyle(ChatFormatting.GREEN).append(Component.literal(line)));
+		if (config.particles) level.broadcastEntityEvent(v, EntityEvent.VILLAGER_ANGRY);
+		villagerNextTalk.put(v.getUUID(), now + 20L * config.villagerCooldownSeconds);
+	}
+
+	/** A trade completed: remember it, sparkle, and let the trade-screen conversation react. */
+	public void onTrade(ServerPlayer player, Villager v, MerchantOffer offer) {
+		VillagerMemory.update(v, player, VillagerMemory.Rel::withTrade);
+		if (config.particles) v.level().broadcastEntityEvent(v, EntityEvent.VILLAGER_HAPPY);
+		dialogue.onTraded(player, v, offer);
 	}
 
 	/** Vanilla villager particles: angry puff, sweat drops, hearts, or green sparkles. */

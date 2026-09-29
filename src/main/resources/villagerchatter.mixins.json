@@ -5,7 +5,8 @@
 	"mixins": [
 		"DisplayAccessor",
 		"TextDisplayAccessor",
-		"AbstractVillagerMixin"
+		"AbstractVillagerMixin",
+		"AbstractVillagerTradeMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

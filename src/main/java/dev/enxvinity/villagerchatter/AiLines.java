@@ -203,7 +203,7 @@ public final class AiLines {
 				o.add("replies", r);
 				messages.add(msg("assistant", o.toString()));
 			} else {
-				messages.add(msg("user", "The player says: " + said.text()));
+				messages.add(msg("user", said.text().startsWith("[") ? said.text() : "The player says: " + said.text()));
 			}
 		}
 		body.add("messages", messages);
