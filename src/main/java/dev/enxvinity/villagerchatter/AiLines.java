@@ -172,7 +172,7 @@ public final class AiLines {
 				+ "Minecraft facts: villagers trade items for emeralds; emeralds are money, not treasure. "
 				+ "Only talk about things that exist in the Minecraft world (no real-world books, places, or people).\n"
 				+ "Respond in JSON. 'line' = what you say next: one or two short sentences, in character, a little funny, "
-				+ "reacting to what the player just said. 'replies' = exactly 3 short things the PLAYER could say back, "
+				+ "reacting to what the player just said. Never repeat something you already said. 'replies' = exactly 3 short things the PLAYER could say back, "
 				+ "each 2 to 5 words, all different (one friendly, one curious, one cheeky).";
 	}
 
@@ -180,19 +180,35 @@ public final class AiLines {
 	private static final String DIALOGUE_EX_ANSWER = "{\"line\":\"Well, look who it is! Browsing or buying?\","
 			+ "\"replies\":[\"Just browsing.\",\"What's popular today?\",\"Buying, if it's cheap.\"]}";
 
+	/** Asks for a turn; if the villager just repeats itself, tries once more with a hotter temperature. */
 	public CompletableFuture<Optional<Turn>> requestDialogue(String scene, String event, List<Said> history) {
+		return requestDialogueOnce(scene, event, history, 0.8).thenCompose(first -> {
+			if (first.isPresent() && !isRepeat(first.get().line(), history)) return CompletableFuture.completedFuture(first);
+			VillagerChatter.LOGGER.info("Villager repeated itself, retrying.");
+			return requestDialogueOnce(scene, event, history, 1.1)
+					.thenApply(second -> second.filter(t -> !isRepeat(t.line(), history)));
+		});
+	}
+
+	private static boolean isRepeat(String line, List<Said> history) {
+		String norm = line.toLowerCase().replaceAll("[^a-z ]", "").trim();
+		for (Said s : history) {
+			if (s.byVillager() && s.text().toLowerCase().replaceAll("[^a-z ]", "").trim().equals(norm)) return true;
+		}
+		return norm.equals("well look who it is browsing or buying");
+	}
+
+	private CompletableFuture<Optional<Turn>> requestDialogueOnce(String scene, String event, List<Said> history, double temperature) {
 		JsonObject body = new JsonObject();
 		body.addProperty("model", config.model);
 		body.addProperty("stream", false);
 		body.addProperty("keep_alive", "30m");
 		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"},"
-				+ "\"replies\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":3,\"maxItems\":3}},"
+				+ "\"replies\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":3},\"minItems\":3,\"maxItems\":3}},"
 				+ "\"required\":[\"line\",\"replies\"]}"));
 
 		JsonArray messages = new JsonArray();
 		messages.add(msg("system", dialogueSystem(scene)));
-		messages.add(msg("user", DIALOGUE_EX_EVENT));
-		messages.add(msg("assistant", DIALOGUE_EX_ANSWER));
 		messages.add(msg("user", event));
 		for (Said said : history) {
 			if (said.byVillager()) {
@@ -209,7 +225,7 @@ public final class AiLines {
 		body.add("messages", messages);
 
 		JsonObject options = new JsonObject();
-		options.addProperty("temperature", 0.8);
+		options.addProperty("temperature", temperature);
 		options.addProperty("num_predict", 220);
 		body.add("options", options);
 
@@ -232,10 +248,11 @@ public final class AiLines {
 						cleanReply(el.getAsString()).filter(r -> !replies.contains(r)).ifPresent(replies::add);
 						if (replies.size() == 3) break;
 					}
+					if (replies.size() < 3) VillagerChatter.LOGGER.info("Some AI replies were rejected. Raw: {}", content);
 					return Optional.of(new Turn(line.get(), replies));
 				})
 				.exceptionally(err -> {
-					VillagerChatter.LOGGER.info("Dialogue AI failed ({}), using a fallback line.", err.getClass().getSimpleName());
+					VillagerChatter.LOGGER.info("Dialogue AI failed ({}), using a fallback line.", err.toString());
 					return Optional.empty();
 				});
 	}
@@ -254,7 +271,12 @@ public final class AiLines {
 	/** Player reply buttons: short and clean. */
 	static Optional<String> cleanReply(String raw) {
 		String s = STAGE_DIRECTIONS.matcher(raw).replaceAll("").replace("\"", "").replaceAll("\\s+", " ").trim();
-		if (s.isEmpty() || s.split(" ").length < 2 || s.split(" ").length > 12 || s.length() > 70
+		// Long, multi-sentence replies: keep just the first sentence ("I'll take two! How much?" -> "I'll take two!").
+		if (s.split(" ").length > 8) {
+			Matcher m = FIRST_SENTENCE.matcher(s);
+			if (m.find()) s = m.group(1).trim();
+		}
+		if (s.isEmpty() || s.split(" ").length < 2 || s.split(" ").length > 16 || s.length() > 100
 				|| s.matches(".*[,:;]$") || BLOCKED.matcher(s).find()) return Optional.empty();
 		return Optional.of(s);
 	}

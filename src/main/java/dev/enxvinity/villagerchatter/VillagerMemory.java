@@ -75,7 +75,7 @@ public final class VillagerMemory {
 		} else {
 			sb.append("You've never met this player before.");
 		}
-		if (!r.last().isEmpty()) sb.append(" Last time you told them: \"").append(r.last()).append("\"");
+		// Note: we deliberately do NOT quote the last line back to the model; small models just repeat it.
 		return sb.toString();
 	}
 }
