@@ -16,7 +16,7 @@ import java.util.Properties;
 public final class ChatterConfig {
 	public boolean aiEnabled = true;
 	public String ollamaUrl = "http://127.0.0.1:11434";
-	public String model = "smollm2:1.7b";
+	public String model = "qwen3:4b";
 	public int aiTimeoutMs = 4000;
 	public double hearingRange = 6.0;
 	public float talkChance = 0.15f;
@@ -42,6 +42,8 @@ public final class ChatterConfig {
 		c.aiEnabled = Boolean.parseBoolean(p.getProperty("aiEnabled", String.valueOf(c.aiEnabled)));
 		c.ollamaUrl = p.getProperty("ollamaUrl", c.ollamaUrl);
 		c.model = p.getProperty("model", c.model);
+		// v0.7 upgrade: move people off the old default model to the better one.
+		if (!p.containsKey("configVersion") && c.model.equals("smollm2:1.7b")) c.model = "qwen3:4b";
 		c.aiTimeoutMs = parseInt(p, "aiTimeoutMs", c.aiTimeoutMs);
 		c.hearingRange = parseDouble(p, "hearingRange", c.hearingRange);
 		c.talkChance = (float) parseDouble(p, "talkChance", c.talkChance);
@@ -58,6 +60,7 @@ public final class ChatterConfig {
 
 	private void save(Path file) {
 		Properties p = new Properties();
+		p.setProperty("configVersion", "2");
 		p.setProperty("aiEnabled", String.valueOf(aiEnabled));
 		p.setProperty("ollamaUrl", ollamaUrl);
 		p.setProperty("model", model);
@@ -74,7 +77,7 @@ public final class ChatterConfig {
 		try {
 			Files.createDirectories(file.getParent());
 			try (Writer w = Files.newBufferedWriter(file)) {
-				p.store(w, "Villager Chatter settings. aiEnabled=false uses only hand-written lines. model can be smollm2:360m (tinier/faster) or smollm2:1.7b (smarter).");
+				p.store(w, "Villager Chatter settings. aiEnabled=false uses only hand-written lines. model: qwen3:4b (default, best), smollm2:1.7b (lighter), nemotron-mini (NVIDIA roleplay model).");
 			}
 		} catch (IOException e) {
 			VillagerChatter.LOGGER.warn("Couldn't write {}", file, e);

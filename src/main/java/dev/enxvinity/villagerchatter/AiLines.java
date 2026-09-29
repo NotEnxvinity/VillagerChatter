@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * falls back to the hand-written lines.
  */
 public final class AiLines {
-	private static final String SYSTEM = "You write one short line of dialogue for a Minecraft villager. "
+	private static final String SYSTEM = "Respond in JSON with a 'line' field. You write one short line of dialogue for a Minecraft villager. "
 			+ "The line is under 12 words, in character, a little funny, and fits the job and situation. "
 			+ "Output only the line.";
 
@@ -57,33 +57,46 @@ public final class AiLines {
 				.build();
 	}
 
+	/** Shared request fields. Same num_ctx everywhere so Ollama never reloads the model between request types. */
+	private JsonObject baseBody() {
+		JsonObject body = new JsonObject();
+		body.addProperty("model", config.model);
+		body.addProperty("stream", false);
+		body.addProperty("keep_alive", "30m");
+		if (config.model.startsWith("qwen3")) body.addProperty("think", false); // skip the hidden "reasoning" step
+		return body;
+	}
+
+	private static JsonObject baseOptions(double temperature, int maxTokens) {
+		JsonObject o = new JsonObject();
+		o.addProperty("temperature", temperature);
+		o.addProperty("num_predict", maxTokens);
+		o.addProperty("num_ctx", 2048); // small context = much less memory
+		return o;
+	}
+
 	public boolean available() {
 		return config.aiEnabled && System.currentTimeMillis() >= offlineUntilMs;
 	}
 
 	public CompletableFuture<Optional<String>> requestLine(ChatterLines.Situation s) {
-		JsonObject body = new JsonObject();
-		body.addProperty("model", config.model);
-		body.addProperty("stream", false);
-		body.addProperty("keep_alive", "30m");
+		JsonObject body = baseBody();
+		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"}},\"required\":[\"line\"]}"));
 
 		JsonArray messages = new JsonArray();
 		messages.add(msg("system", SYSTEM));
 		for (String[] shot : SHOTS) {
 			messages.add(msg("user", shot[0]));
-			messages.add(msg("assistant", shot[1]));
+			JsonObject ans = new JsonObject();
+			ans.addProperty("line", shot[1]);
+			messages.add(msg("assistant", ans.toString()));
 		}
 		messages.add(msg("user", s.toPrompt()));
 		body.add("messages", messages);
 
-		JsonObject options = new JsonObject();
-		options.addProperty("temperature", 0.9);
+		JsonObject options = baseOptions(0.9, 48);
 		options.addProperty("top_p", 0.95);
-		options.addProperty("num_predict", 32);
 		options.addProperty("repeat_penalty", 1.15);
-		JsonArray stop = new JsonArray();
-		stop.add("\n");
-		options.add("stop", stop);
 		body.add("options", options);
 
 		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
@@ -99,9 +112,10 @@ public final class AiLines {
 						if (resp.statusCode() == 404) markOffline("model '" + config.model + "' not found — run: ollama pull " + config.model);
 						return Optional.<String>empty();
 					}
-					String raw = JsonParser.parseString(resp.body()).getAsJsonObject()
+					String content = JsonParser.parseString(resp.body()).getAsJsonObject()
 							.getAsJsonObject("message").get("content").getAsString();
-					Optional<String> cleaned = clean(raw);
+					String raw = JsonParser.parseString(content).getAsJsonObject().get("line").getAsString();
+					Optional<String> cleaned = clean(raw).filter(l -> l.split(" ").length >= 2);
 					if (cleaned.isEmpty()) VillagerChatter.LOGGER.debug("Rejected model output: {}", raw);
 					warnedOffline = false;
 					return cleaned;
@@ -111,6 +125,8 @@ public final class AiLines {
 					if (cause instanceof java.net.http.HttpTimeoutException) {
 						// Slow (usually the model still loading) — just use a hand-written line this time.
 						VillagerChatter.LOGGER.info("AI took longer than {} ms, using a hand-written line.", config.aiTimeoutMs);
+					} else if (!(cause instanceof java.io.IOException)) {
+						VillagerChatter.LOGGER.debug("Bad AI output: {}", cause.toString());
 					} else {
 						markOffline("couldn't reach Ollama at " + config.ollamaUrl + " (" + cause.getClass().getSimpleName() + ")");
 					}
@@ -118,21 +134,51 @@ public final class AiLines {
 				});
 	}
 
-	/** Load the model into memory at startup so the first real line isn't slow. */
+	/**
+	 * Load the model into memory at startup so the first real line isn't slow.
+	 * If Ollama doesn't have the model yet, download it automatically (one time).
+	 */
 	public void warmUp() {
 		if (!config.aiEnabled) return;
-		JsonObject body = new JsonObject();
-		body.addProperty("model", config.model);
-		body.addProperty("keep_alive", "30m");
+		JsonObject body = baseBody();
+		body.remove("stream");
+		body.add("options", baseOptions(0.1, 1));
 		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/generate"))
-				.timeout(Duration.ofSeconds(60))
+				.timeout(Duration.ofSeconds(90))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
 				.build();
-		http.sendAsync(req, HttpResponse.BodyHandlers.discarding())
-				.whenComplete((r, e) -> VillagerChatter.LOGGER.info(e == null
-						? "AI model " + config.model + " is loaded and ready."
-						: "Couldn't warm up the AI model (is Ollama running?) — hand-written lines until it is."));
+		http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).whenComplete((r, e) -> {
+			if (e != null) {
+				VillagerChatter.LOGGER.info("Couldn't reach Ollama at {} (is it running?) — hand-written lines until it is.", config.ollamaUrl);
+			} else if (r.statusCode() == 404) {
+				pullModel();
+			} else {
+				VillagerChatter.LOGGER.info("AI model {} is loaded and ready.", config.model);
+			}
+		});
+	}
+
+	private void pullModel() {
+		VillagerChatter.LOGGER.info("Ollama doesn't have {} yet — downloading it now (one time, a few GB). Hand-written lines until it's done.", config.model);
+		offlineUntilMs = Long.MAX_VALUE;
+		JsonObject body = new JsonObject();
+		body.addProperty("model", config.model);
+		body.addProperty("stream", false);
+		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/pull"))
+				.timeout(Duration.ofMinutes(45))
+				.header("Content-Type", "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+				.build();
+		http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).whenComplete((r, e) -> {
+			offlineUntilMs = 0;
+			if (e == null && r.statusCode() == 200) {
+				VillagerChatter.LOGGER.info("Downloaded {}. Loading it…", config.model);
+				warmUp();
+			} else {
+				VillagerChatter.LOGGER.warn("Couldn't download {}: {}", config.model, e != null ? e.toString() : r.body());
+			}
+		});
 	}
 
 	private void markOffline(String why) {
@@ -199,10 +245,7 @@ public final class AiLines {
 	}
 
 	private CompletableFuture<Optional<Turn>> requestDialogueOnce(String scene, String event, List<Said> history, double temperature) {
-		JsonObject body = new JsonObject();
-		body.addProperty("model", config.model);
-		body.addProperty("stream", false);
-		body.addProperty("keep_alive", "30m");
+		JsonObject body = baseBody();
 		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"},"
 				+ "\"replies\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":3},\"minItems\":3,\"maxItems\":3}},"
 				+ "\"required\":[\"line\",\"replies\"]}"));
@@ -224,10 +267,7 @@ public final class AiLines {
 		}
 		body.add("messages", messages);
 
-		JsonObject options = new JsonObject();
-		options.addProperty("temperature", temperature);
-		options.addProperty("num_predict", 220);
-		body.add("options", options);
+		body.add("options", baseOptions(temperature, 220));
 
 		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
 				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
@@ -296,10 +336,7 @@ public final class AiLines {
 			+ "{\"who\":\"B\",\"text\":\"Drowning? They're thriving! Unlike your book sales.\"},{\"who\":\"A\",\"text\":\"Hrmm. Rude.\"}]}";
 
 	public CompletableFuture<Optional<List<TalkLine>>> requestSmallTalk(String scene) {
-		JsonObject body = new JsonObject();
-		body.addProperty("model", config.model);
-		body.addProperty("stream", false);
-		body.addProperty("keep_alive", "30m");
+		JsonObject body = baseBody();
 		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"lines\":{\"type\":\"array\",\"minItems\":2,\"maxItems\":4,"
 				+ "\"items\":{\"type\":\"object\",\"properties\":{\"who\":{\"type\":\"string\",\"enum\":[\"A\",\"B\"]},"
 				+ "\"text\":{\"type\":\"string\"}},\"required\":[\"who\",\"text\"]}}},\"required\":[\"lines\"]}"));
@@ -309,10 +346,7 @@ public final class AiLines {
 		messages.add(msg("assistant", SMALLTALK_EX_ANSWER));
 		messages.add(msg("user", scene));
 		body.add("messages", messages);
-		JsonObject options = new JsonObject();
-		options.addProperty("temperature", 0.9);
-		options.addProperty("num_predict", 200);
-		body.add("options", options);
+		body.add("options", baseOptions(0.9, 200));
 
 		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
 				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))

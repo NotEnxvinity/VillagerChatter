@@ -37,3 +37,11 @@ Cold start (first line after the model loads) takes a few seconds; the mod falls
 
 ## 5. Safety
 Output passes a filter: strip stage directions/quotes, keep the first sentence, reject >16 words or blocked words. Rejected output falls back to a hand-written line. Worth expanding the blocklist as you see weird output.
+
+## 6. Model comparison (v0.7, Sep 2026)
+Same cleric conversation, 4 turns, CPU-only VM:
+- `smollm2:1.7b` — confused about trades ("32 Rotten Flesh for 3 emeralds"), long rambling replies, parroted examples/memory.
+- `nemotron-mini` (NVIDIA's 4B on-device roleplay model from ACE, 2.7 GB) — coherent but bland; replies drifted into "I'm sure you'll enjoy it."
+- `qwen3:1.7b` — better voice, but repeated the same reply sets.
+- **`qwen3:4b` — winner.** Quotes real trades correctly, short player replies (2–5 words as asked), actually funny. ~1–3 s per turn on CPU, faster on Apple GPU. NVIDIA ACE itself now ships Qwen3 (8B) for on-device game characters.
+Memory: all requests use `num_ctx=2048` (Ollama's larger default was the main reason llama-server used ~5.8 GB).
