@@ -218,7 +218,7 @@ public final class AiLines {
 				+ "Minecraft facts: villagers trade items for emeralds; emeralds are money, not treasure. "
 				+ "Only talk about things that exist in the Minecraft world (no real-world books, places, or people).\n"
 				+ "Respond in JSON. 'line' = what you say next: one or two short sentences, in character, a little funny, "
-				+ "reacting to what the player just said. Never repeat something you already said. 'replies' = exactly 3 short things the PLAYER could say back, "
+				+ "reacting to what the player just said. Never repeat something you already said. 'replies' = exactly 3 NEW short things the PLAYER could say back (never reuse earlier options), "
 				+ "each 2 to 5 words, all different (one friendly, one curious, one cheeky).";
 	}
 
@@ -228,12 +228,26 @@ public final class AiLines {
 
 	/** Asks for a turn; if the villager just repeats itself, tries once more with a hotter temperature. */
 	public CompletableFuture<Optional<Turn>> requestDialogue(String scene, String event, List<Said> history) {
-		return requestDialogueOnce(scene, event, history, 0.8).thenCompose(first -> {
-			if (first.isPresent() && !isRepeat(first.get().line(), history)) return CompletableFuture.completedFuture(first);
+		return requestDialogueOnce(scene, event, history, 0.8, false).thenCompose(first -> {
+			if (first.isPresent() && !isRepeat(first.get().line(), history)) {
+				return CompletableFuture.completedFuture(first.map(t -> freshReplies(t, history)));
+			}
 			VillagerChatter.LOGGER.info("Villager repeated itself, retrying.");
-			return requestDialogueOnce(scene, event, history, 1.1)
-					.thenApply(second -> second.filter(t -> !isRepeat(t.line(), history)));
+			return requestDialogueOnce(scene, event, history, 1.0, true)
+					.thenApply(second -> second.filter(t -> !isRepeat(t.line(), history)).map(t -> freshReplies(t, history)));
 		});
+	}
+
+	/** Drop reply options the player was already offered last turn (the model loves to reuse them). */
+	private static Turn freshReplies(Turn t, List<Said> history) {
+		List<String> previous = List.of();
+		for (int i = history.size() - 1; i >= 0; i--) {
+			if (history.get(i).byVillager()) { previous = history.get(i).replies(); break; }
+		}
+		List<String> prevNorm = previous.stream().map(r -> r.toLowerCase().replaceAll("[^a-z ]", "").trim()).toList();
+		List<String> kept = t.replies().stream()
+				.filter(r -> !prevNorm.contains(r.toLowerCase().replaceAll("[^a-z ]", "").trim())).toList();
+		return new Turn(t.line(), kept);
 	}
 
 	private static boolean isRepeat(String line, List<Said> history) {
@@ -244,7 +258,7 @@ public final class AiLines {
 		return norm.equals("well look who it is browsing or buying");
 	}
 
-	private CompletableFuture<Optional<Turn>> requestDialogueOnce(String scene, String event, List<Said> history, double temperature) {
+	private CompletableFuture<Optional<Turn>> requestDialogueOnce(String scene, String event, List<Said> history, double temperature, boolean nudge) {
 		JsonObject body = baseBody();
 		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"},"
 				+ "\"replies\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":3},\"minItems\":3,\"maxItems\":3}},"
@@ -256,15 +270,14 @@ public final class AiLines {
 		for (Said said : history) {
 			if (said.byVillager()) {
 				JsonObject o = new JsonObject();
+				// Only the line: showing the model its old reply options makes it reuse them.
 				o.addProperty("line", said.text());
-				JsonArray r = new JsonArray();
-				said.replies().forEach(r::add);
-				o.add("replies", r);
 				messages.add(msg("assistant", o.toString()));
 			} else {
 				messages.add(msg("user", said.text().startsWith("[") ? said.text() : "The player says: " + said.text()));
 			}
 		}
+		if (nudge) messages.add(msg("user", "[You already said that. Say something new, and give 3 new replies.]"));
 		body.add("messages", messages);
 
 		body.add("options", baseOptions(temperature, 220));

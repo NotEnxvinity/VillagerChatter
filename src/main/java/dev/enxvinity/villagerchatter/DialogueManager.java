@@ -33,6 +33,10 @@ public final class DialogueManager {
 	private static final long GREETING_COOLDOWN_TICKS = 20 * 60;   // 60 s
 	private static final long MEMORY_TICKS = 20 * 60 * 5;          // 5 min
 	private static final int MAX_HISTORY = 8;                      // messages kept in the prompt
+	/** If the AI fails mid-conversation, stay conversational instead of blurting an ambient line. */
+	private static final List<String> FALLBACK_LINES = List.of(
+			"Hrmm. Lost my train of thought.", "Sorry, what were we talking about?", "Hmm? Oh, right. Where was I?",
+			"Hrmm… it's been a long day.", "Let me think about that one.");
 	private static final List<String> FALLBACK_REPLIES = List.of(
 			"What's good today?", "How's village life?", "Nice outfit.",
 			"Any gossip?", "Got a discount for me?", "What do you do all day?");
@@ -126,7 +130,7 @@ public final class DialogueManager {
 		String said = conv.replies.get(index);
 		conv.history.add(new AiLines.Said(false, said, List.of()));
 		ChatterLines.Situation s = ChatterLines.describe(level, villager, player);
-		String fallback = ChatterLines.pick(s, level.getRandom());
+		String fallback = FALLBACK_LINES.get(level.getRandom().nextInt(FALLBACK_LINES.size()));
 		generate(player, villager, conv, context(s, villager, player), conv.opener, fallback);
 	}
 
