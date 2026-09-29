@@ -1,49 +1,73 @@
 # Villager Chatter
 
-A Fabric mod for Minecraft 26.3 where villagers say random, situation-aware lines when you walk near them.
+**Minecraft villagers that actually talk.** A Fabric mod for Minecraft Java 26.3 where villagers say things that fit who they are and what's happening around them. The lines are written live by a small AI model that runs **entirely on your own computer**. No account, no API key, no internet needed after the first download.
+
+## What it does
+- **Speech bubbles.** Villagers comment on their job, the biome, the time, the weather, nearby monsters, raids, and how hurt you look. Only one talks at a time, with vanilla mood particles (happy, angry, sweating, hearts).
+- **Talk to them while trading.** Open a villager's trades and a conversation panel appears above the window: the villager's line, three reply options written for that moment, and "Let's just trade." Hover over a cut-off reply to read all of it.
+- **They know their shop.** Conversations use the villager's real trades ("I'll take 32 rotten flesh for one emerald").
+- **They remember you.** Trades, hits, and vanilla reputation are saved per villager. Regulars get greeted like friends; hit one and it holds a grudge.
+- **Trade reactions.** Finish a trade mid-conversation and the villager comments on it.
+- **Instant reactions.** Punch a villager and hear about it right away.
+- **Villager small talk.** Two villagers standing together sometimes have a short overheard exchange, and they look at each other while they talk.
+- **Always works.** If the AI is off, loading, or says something strange, villagers fall back to hand-written lines.
+
+## Install
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3, plus [Fabric API](https://modrinth.com/mod/fabric-api).
+2. Put `villagerchatter-<version>.jar` in your `mods` folder (build it yourself, see below, or grab a release).
+3. Launch. The first time, the mod downloads its AI (see below). Villagers use simple lines until chat says **"Villagers are now fully awake."**
+
+The mod needs to be on the server, or in your singleplayer game, for villagers to talk. It needs to be on the client for the trade-screen conversation panel. Speech bubbles show up even for players without the mod.
+
+## How the AI works
+On first launch the mod downloads two things into `.minecraft/villagerchatter/`:
+
+| File | From | Size |
+|---|---|---|
+| `llama-server` (llama.cpp, pinned build b11242) for your OS | official [llama.cpp GitHub release](https://github.com/ggml-org/llama.cpp/releases/tag/b11242) | ~12–35 MB |
+| `Qwen3-4B-Q4_K_M.gguf` | official [Qwen Hugging Face page](https://huggingface.co/Qwen/Qwen3-4B-GGUF) | ~2.5 GB |
+
+Both are checked against pinned SHA-256 hashes before use. The server runs in the background on a random port that **only listens on your own computer (127.0.0.1)**, uses your GPU when it can (Metal on Mac, Vulkan on Windows/Linux, falling back to CPU), and shuts down when the game closes. Nothing you do in game is sent anywhere.
+
+Plan on about 3 GB of free RAM for the AI. Its log is at `villagerchatter/llama-server.log`.
+
+Prefer Ollama? Set `backend=ollama` in the config and the mod will use your Ollama install instead (model set by `model=`, default `qwen3:4b`).
+
+## Config
+`.minecraft/config/villagerchatter.properties`
+
+| Setting | Default | What it does |
+|---|---|---|
+| `aiEnabled` | `true` | `false` = hand-written lines only |
+| `backend` | `builtin` | `builtin` or `ollama` |
+| `showBubbles` / `showInChat` | `true` / `false` | where lines appear |
+| `particles` | `true` | mood particles |
+| `dialogueEnabled` | `true` | trade-screen conversations |
+| `smallTalkChance` | `0.35` | how often villagers chat with each other |
+| `talkChance`, `hearingRange`, `villagerCooldownSeconds`, `playerCooldownSeconds` | | how chatty villagers are |
+
+## Building
+Requires JDK 25.
+```
+./gradlew build        # jar ends up in build/libs/
+./gradlew runClient    # test in a dev Minecraft
+```
 
 ## Roadmap
-- [x] Stage 1 — Fabric project set up
-- [x] Stage 2 — Villagers say hand-written lines (by job, rain, baby, player hurt)
-- [x] Stage 3 — Tested prompts with SmolLM2 (few-shot prompt + output filter)
-- [x] Stage 4 — Mod asks Ollama for lines on a background thread, falls back to hand-written lines
-- [x] v0.3 — Speech bubbles above heads + mood particles
-- [x] v0.4 — Conversations in the trading screen (villager line + 3 AI replies + "Let's just trade.")
-- [x] v0.5 — Villager memory (trades, hits, last thing said; persists), trade reactions, instant hit reactions
-- [x] v0.6 — Villagers chat with each other (overheard 2–4 line exchanges)
-- [x] v0.7 — Switched to qwen3:4b (much better dialogue), JSON output everywhere, 2k context (less RAM), auto-download of the model
-- [x] v0.8 — Built-in AI: mod downloads and runs llama.cpp + Qwen3-4B itself; Ollama optional
-- [ ] In-game settings screen, Modrinth page
+- [x] Ambient AI lines, speech bubbles, mood particles
+- [x] Trade-screen conversations with reply options
+- [x] Villager memory, trade and hit reactions, villager small talk
+- [x] Built-in AI (no Ollama needed)
+- [ ] World reactions: raids starting/ending, the bell, bedtime
+- [ ] In-game settings screen, bubble size, chattiness slider, "hrmm" sounds
+- [ ] Shared model folder across instances, Modrinth release
 
-## First-time setup (Mac)
-1. Install **JDK 25** (Temurin: https://adoptium.net) and **IntelliJ IDEA Community**.
-2. In IntelliJ: Settings → Plugins → install **Minecraft Development**.
-3. File → Open → select this `VillagerChatter` folder. Let Gradle sync (first time downloads Minecraft, takes a few minutes).
-   - If asked for a JDK, pick 25.
-4. Gradle panel (elephant icon, right side) → Tasks → fabric → **runClient**.
-5. Make a creative world, find a village, and walk up to villagers. Lines show up in chat.
+See [DESIGN.md](DESIGN.md) for the design notes and the model comparison.
 
-## The AI (no setup needed)
-Since v0.8 the mod runs its own AI. On first launch it downloads, into `.minecraft/villagerchatter/`:
-- llama.cpp's `llama-server` for your OS (official GitHub release, pinned build b11242, ~12–35 MB)
-- the Qwen3-4B model (`Qwen3-4B-Q4_K_M.gguf`, official Qwen Hugging Face page, ~2.5 GB)
+## Credits
+- AI engine: [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT)
+- Model: [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B-GGUF) by the Qwen team (Apache-2.0)
+- Built on [Fabric](https://fabricmc.net/)
 
-Both are checked against pinned SHA-256 hashes. Villagers use hand-written lines until it's ready; you'll get a chat message when it is.
-The server only listens on 127.0.0.1 and stops when the game closes. Log: `villagerchatter/llama-server.log`.
-
-Settings live in `.minecraft/config/villagerchatter.properties` (in Prism: instance → Folder → config).
-- `backend=builtin` (default) or `backend=ollama` to use an Ollama install instead (`model=` picks the Ollama model)
-- `aiEnabled=false` for hand-written lines only
-- Other switches: `showBubbles`, `showInChat`, `particles`, `dialogueEnabled`, `smallTalkChance`.
-- The game log shows `[AI]` or `[hand-written]` next to each line.
-
-## Where to tinker
-- `ChatterLines.java` — what villagers know (`Situation`) + hand-written fallback lines.
-- `AiLines.java` — the prompt, examples, and output filter for the AI.
-- `ChatterConfig.java` — settings file.
-- `DESIGN.md` — ideas and decisions for what to build next.
-- `VillagerChatter.java` — tuning knobs at the top: range, talk chance, cooldowns.
-
-## Build a jar for Prism Launcher
-Gradle panel → Tasks → build → **build**. The mod jar is in `build/libs/`.
-Drop it (plus Fabric API) into a Fabric 26.3 instance's `mods` folder in Prism.
+## License
+[MIT](LICENSE) © 2026 Enxvinity

@@ -1,7 +1,7 @@
 # Villager Chatter — notes for Claude Code
 
 Fabric mod for Minecraft Java 26.3 (Mojang's unobfuscated names, no Yarn). Java 25, Gradle 9.7.1 wrapper, Loom 1.18.
-Owner: Enx — freshman engineering student, knows JavaScript/Swift, new to Java and Fabric. Explain changes briefly as you go.
+Maintainer: Enxvinity (comfortable with JavaScript/Swift, newer to Java and Fabric) — explain changes briefly as you go.
 
 ## Goal
 Villagers say short, situation-aware lines when a player is near. Hand-written lines now; a small local language model later.
