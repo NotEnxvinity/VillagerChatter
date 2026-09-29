@@ -7,6 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityEvent;
 import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.trading.MerchantOffer;
 
 import java.util.ArrayList;
@@ -173,16 +174,25 @@ public final class DialogueManager {
 
 	/** Who the villager is, what it sells, and what's going on — the AI's "scene". */
 	private static String context(ChatterLines.Situation s, Villager villager) {
-		List<String> sells = new ArrayList<>();
+		// Describe real trades from the villager's point of view, e.g.
+		// "You buy 20 Wheat for 1 Emerald. You sell 6 Bread for 1 Emerald."
+		List<String> trades = new ArrayList<>();
 		for (MerchantOffer offer : villager.getOffers()) {
-			String name = offer.getResult().getHoverName().getString();
-			if (!sells.contains(name)) sells.add(name);
-			if (sells.size() >= 4) break;
+			var cost = offer.getCostA();
+			var costB = offer.getCostB();
+			var result = offer.getResult();
+			String costText = cost.getCount() + " " + cost.getHoverName().getString()
+					+ (costB.isEmpty() ? "" : " and " + costB.getCount() + " " + costB.getHoverName().getString());
+			String t = result.getItem() == Items.EMERALD
+					? "You buy " + costText + " for " + result.getCount() + " Emerald"
+					: "You sell " + result.getCount() + " " + result.getHoverName().getString() + " for " + costText;
+			trades.add(t + (offer.isOutOfStock() ? " (sold out)" : ""));
+			if (trades.size() >= 4) break;
 		}
 		String job = s.baby() ? "baby villager" : (s.profession().equals("none") ? "unemployed villager" : s.profession());
 		StringBuilder sb = new StringBuilder();
 		sb.append("a ").append(job).append(" in a ").append(s.biome().replace('_', ' ')).append(" village. ");
-		if (!sells.isEmpty()) sb.append("Sells: ").append(String.join(", ", sells)).append(". ");
+		if (!trades.isEmpty()) sb.append("Your trades: ").append(String.join(". ", trades)).append(". Emeralds are the currency. ");
 		sb.append("Time: ").append(s.night() ? "night" : "day").append(". ");
 		sb.append("Weather: ").append(s.thundering() ? "thunderstorm" : s.raining() ? "raining" : "clear").append(".");
 		if (s.raid()) sb.append(" The village is being raided!");
