@@ -36,6 +36,16 @@ Villagers say short, situation-aware lines when a player is near. Hand-written l
 - `VillagerChatter.speakEvent()` makes one villager react to an event (AI line via `AiLines.requestLine(situation, event)`, hand-written fallback lists in ChatterLines). Throttled to once per 10 s per villager and only when a player is within 32 blocks.
 - Raids: `checkRaids()` checks `getRaidAt(player pos)` each second (WeakHashMap tracks start/end). Bell: `BellBlockMixin` on `attemptToRing` RETURN. Bedtime: `LivingEntitySleepMixin` on `startSleeping` (35% chance, player within 16 blocks).
 
+## NEXT UP (agreed with Enx after v0.9.2)
+Do these in order, test on both his Mac and his Steam Machine (SteamOS, Prism Launcher), then release:
+1. **Settings screen**: vanilla widgets only (no Cloth Config/YACL). Open it from Mod Menu (optional dependency via `modmenu` entrypoint, `ConfigScreenFactory`) and via a `/villagerchatter settings` client command as a fallback. No button in vanilla Options. Settings: chattiness (talkChance), bubble size (scale), bubbles vs chat, particles, small-talk chance, AI on/off, model folder location.
+2. **"hrmm" sounds**: play vanilla villager ambient/yes/no sounds when a bubble appears (respect a sounds toggle).
+3. **Shared model folder** across instances: macOS `~/Library/Application Support/VillagerChatter/`, Windows `%LOCALAPPDATA%\VillagerChatter\`, Linux/SteamOS `$XDG_DATA_HOME` or `~/.local/share/villagerchatter/` (Flatpak Prism remaps this into its sandbox; still shared across its instances). On first run, MOVE an existing `<gameDir>/villagerchatter/` download there instead of re-downloading; keep SHA-256 checks; configurable override path.
+4. **Modrinth release**: icon, screenshots (Enx has a butcher trade-screen screenshot he likes: "I've got a knife and a lot of patience."), description from README.
+
+Workflow notes: build in the VM copy ($HOME/vc) because the Documents mount can't delete files; JDK 25 at $HOME/tools/jdk-25.0.4.1+1 (set JAVA_HOME). Commit/push via GitHub Desktop (give Enx a heads-up before taking the screen). Publish releases on GitHub; the release.yml workflow attaches the jar + .sha256. Tell him to remove the old jar when upgrading.
+26.x gotcha: UseEntityCallback always gets an EntityHitResult now (interact packets merged), so never filter on `hit == null`.
+
 ## Commands
 - Build: `./gradlew build` → `build/libs/villagerchatter-<version>.jar`
 - Test in game: `./gradlew runClient`
