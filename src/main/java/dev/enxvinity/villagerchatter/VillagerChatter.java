@@ -112,7 +112,7 @@ public class VillagerChatter implements ModInitializer {
 		net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
 			if (hand == net.minecraft.world.InteractionHand.MAIN_HAND && world instanceof ServerLevel level
 					&& entity instanceof Villager v && player instanceof ServerPlayer
-					&& !v.isSleeping() && !v.isTrading() && hit == null) {
+					&& !v.isSleeping() && !v.isTrading()) {
 				onChatWithoutTrades(level, v);
 			}
 			return net.minecraft.world.InteractionResult.PASS;
