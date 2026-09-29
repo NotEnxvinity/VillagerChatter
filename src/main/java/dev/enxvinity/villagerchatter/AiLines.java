@@ -142,6 +142,11 @@ public final class AiLines {
 	}
 
 	public CompletableFuture<Optional<String>> requestLine(ChatterLines.Situation s) {
+		return requestLine(s, null);
+	}
+
+	/** Same, but reacting to a world event ("The village bell just rang."). */
+	public CompletableFuture<Optional<String>> requestLine(ChatterLines.Situation s, String event) {
 		JsonObject body = baseBody();
 		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"}},\"required\":[\"line\"]}"));
 
@@ -153,7 +158,7 @@ public final class AiLines {
 			ans.addProperty("line", shot[1]);
 			messages.add(msg("assistant", ans.toString()));
 		}
-		messages.add(msg("user", s.toPrompt()));
+		messages.add(msg("user", event == null ? s.toPrompt() : s.toPrompt() + " EVENT: " + event + " React to it."));
 		body.add("messages", messages);
 
 		JsonObject options = baseOptions(0.9, 48);

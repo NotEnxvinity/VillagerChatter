@@ -134,6 +134,19 @@ public final class ChatterLines {
 			"I'm hiding. You didn't see me."
 	);
 
+	public static final List<String> RAID_START = List.of(
+			"PILLAGERS! Everybody inside!", "Hrmm! HRMM! The raid is here!", "Ring the bell! Hide the emeralds!",
+			"Not again. I just fixed my door.");
+	public static final List<String> RAID_WIN = List.of(
+			"We did it! The village is safe!", "Hero! Discounts for you, probably.", "Hrmm! Victory!",
+			"They're gone! I can finally come out.");
+	public static final List<String> RAID_LOSS = List.of(
+			"They took everything...", "Hrmm... the village will rebuild.", "Where was the iron golem?!");
+	public static final List<String> BELL = List.of(
+			"The bell! What happened?", "Who's ringing that? I was busy.", "Hrmm? Trouble?", "Everybody inside!");
+	public static final List<String> BEDTIME = List.of(
+			"Goodnight. Don't steal my bed.", "Zzz... hrmm...", "Finally, sleep.", "Wake me if the zombies knock.");
+
 	public static final List<String> OUCH = List.of(
 			"OW! What was that for?!",
 			"Hey! I'm telling the iron golem!",

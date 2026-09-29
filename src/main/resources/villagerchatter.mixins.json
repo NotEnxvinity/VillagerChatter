@@ -6,7 +6,9 @@
 		"DisplayAccessor",
 		"TextDisplayAccessor",
 		"AbstractVillagerMixin",
-		"AbstractVillagerTradeMixin"
+		"AbstractVillagerTradeMixin",
+		"BellBlockMixin",
+		"LivingEntitySleepMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

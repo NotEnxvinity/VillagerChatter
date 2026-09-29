@@ -113,6 +113,7 @@ public class VillagerChatter implements ModInitializer {
 
 		long now = level.getGameTime();
 		if (now % CHECK_EVERY_TICKS != 0) return;
+		checkRaids(level);
 
 		RandomSource random = level.getRandom();
 		long villagerCooldown = 20L * config.villagerCooldownSeconds;
@@ -273,6 +274,96 @@ public class VillagerChatter implements ModInitializer {
 		if (s == null) return;
 		s.execute(() -> s.getPlayerList().getPlayers().forEach(p ->
 				p.sendSystemMessage(tag().append(Component.literal(text).withStyle(ChatFormatting.GRAY)))));
+	}
+
+	// ---------------- World reactions: raids, the bell, bedtime ----------------
+
+	private final Map<UUID, Long> lastEvent = new HashMap<>();
+	private final java.util.Map<net.minecraft.world.entity.raid.Raid, Boolean> raidsSeen = new java.util.WeakHashMap<>();
+
+	/** Make a villager react to an event right away (skips the ambient cooldowns, but not spam protection). */
+	public void speakEvent(ServerLevel level, Villager v, String event, List<String> fallbacks, byte particle) {
+		if (!v.isAlive()) return;
+		long now = level.getGameTime();
+		if (now < lastEvent.getOrDefault(v.getUUID(), 0L)) return;
+		ServerPlayer listener = null;
+		double best = 32 * 32;
+		for (ServerPlayer p : level.players()) {
+			double d = p.distanceToSqr(v);
+			if (d < best) { best = d; listener = p; }
+		}
+		if (listener == null) return; // nobody around to hear it
+		lastEvent.put(v.getUUID(), now + 200);
+		villagerNextTalk.put(v.getUUID(), now + 20L * config.villagerCooldownSeconds);
+		if (config.particles) level.broadcastEntityEvent(v, particle);
+
+		ChatterLines.Situation situation = ChatterLines.describe(level, v, listener);
+		String fallback = fallbacks.get(level.getRandom().nextInt(fallbacks.size()));
+		UUID playerId = listener.getUUID();
+		if (ai.available()) {
+			ai.requestLine(situation, event).whenComplete((result, err) -> {
+				boolean gotAi = err == null && result != null && result.isPresent();
+				ready.add(new Delivery(playerId, v, situation, gotAi ? result.get() : fallback, gotAi));
+			});
+		} else {
+			ready.add(new Delivery(playerId, v, situation, fallback, false));
+		}
+		LOGGER.info("[event] {}: {}", situation.displayName(), event);
+	}
+
+	/** Up to {@code max} villagers near a spot, closest first. */
+	private static List<Villager> villagersNear(ServerLevel level, net.minecraft.core.BlockPos pos, double radius, int max) {
+		List<Villager> list = new java.util.ArrayList<>(level.getEntitiesOfClass(Villager.class,
+				new net.minecraft.world.phys.AABB(pos).inflate(radius), v -> v.isAlive() && !v.isTrading()));
+		list.sort(java.util.Comparator.comparingDouble(v -> v.distanceToSqr(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5)));
+		return list.size() > max ? list.subList(0, max) : list;
+	}
+
+	/** Checked once a second: notice raids starting and ending near players. */
+	private void checkRaids(ServerLevel level) {
+		for (ServerPlayer p : level.players()) {
+			net.minecraft.world.entity.raid.Raid raid = level.getRaidAt(p.blockPosition());
+			if (raid == null) continue;
+			Boolean announcedStart = raidsSeen.get(raid);
+			if (announcedStart == null && raid.hasFirstWaveSpawned()) {
+				raidsSeen.put(raid, true);
+				for (Villager v : villagersNear(level, raid.getCenter(), 40, 2)) {
+					speakEvent(level, v, "A RAID just started! Pillagers are attacking the village!", ChatterLines.RAID_START,
+							net.minecraft.world.entity.EntityEvent.VILLAGER_SWEAT);
+				}
+			}
+		}
+		// Raids that ended since we last looked.
+		for (var it = raidsSeen.entrySet().iterator(); it.hasNext(); ) {
+			var e = it.next();
+			net.minecraft.world.entity.raid.Raid raid = e.getKey();
+			if (!Boolean.TRUE.equals(e.getValue()) || !raid.isOver()) continue;
+			e.setValue(false);
+			boolean won = raid.isVictory();
+			for (Villager v : villagersNear(level, raid.getCenter(), 48, 2)) {
+				speakEvent(level, v,
+						won ? "The raid is over and the village WON! A hero drove the pillagers away." : "The raid is over. The pillagers won and the village is wrecked.",
+						won ? ChatterLines.RAID_WIN : ChatterLines.RAID_LOSS,
+						won ? net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY : net.minecraft.world.entity.EntityEvent.VILLAGER_ANGRY);
+			}
+		}
+	}
+
+	/** Someone rang a bell: the closest villagers react. */
+	public void onBell(ServerLevel level, net.minecraft.core.BlockPos pos) {
+		for (Villager v : villagersNear(level, pos, 20, 2)) {
+			speakEvent(level, v, "Someone just rang the village bell.", ChatterLines.BELL,
+					net.minecraft.world.entity.EntityEvent.VILLAGER_SWEAT);
+		}
+	}
+
+	/** A villager climbed into bed: sometimes says goodnight if a player is close. */
+	public void onBedtime(Villager v) {
+		if (!(v.level() instanceof ServerLevel level) || level.getRandom().nextFloat() > 0.35f) return;
+		boolean playerClose = level.players().stream().anyMatch(p -> p.distanceToSqr(v) < 16 * 16);
+		if (!playerClose) return;
+		speakEvent(level, v, "You're climbing into bed for the night.", ChatterLines.BEDTIME,
+				net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY);
 	}
 
 	/** A player hit a villager: remember it, and react right away (skips the normal cooldown). */

@@ -9,6 +9,7 @@
 - **They remember you.** Trades, hits, and vanilla reputation are saved per villager. Regulars get greeted like friends; hit one and it holds a grudge.
 - **Trade reactions.** Finish a trade mid-conversation and the villager comments on it.
 - **Instant reactions.** Punch a villager and hear about it right away.
+- **World reactions.** Villagers panic when a raid starts, celebrate (or mourn) when it ends, react when someone rings the village bell, and mutter a goodnight as they climb into bed.
 - **Villager small talk.** Two villagers standing together sometimes have a short overheard exchange, and they look at each other while they talk.
 - **Always works.** If the AI is off, loading, or says something strange, villagers fall back to hand-written lines.
 
@@ -16,6 +17,8 @@
 1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3, plus [Fabric API](https://modrinth.com/mod/fabric-api).
 2. Put `villagerchatter-<version>.jar` in your `mods` folder (build it yourself, see below, or grab a release).
 3. Launch. The first time, the mod downloads its AI (see below). Villagers use simple lines until chat says **"Villagers are now fully awake."**
+
+**Tested on macOS (Apple Silicon) and SteamOS (Linux).** Windows builds of the AI are included and should work the same way.
 
 The mod needs to be on the server, or in your singleplayer game, for villagers to talk. It needs to be on the client for the trade-screen conversation panel. Speech bubbles show up even for players without the mod.
 
@@ -58,7 +61,7 @@ Requires JDK 25.
 - [x] Trade-screen conversations with reply options
 - [x] Villager memory, trade and hit reactions, villager small talk
 - [x] Built-in AI (no Ollama needed)
-- [ ] World reactions: raids starting/ending, the bell, bedtime
+- [x] World reactions: raids starting/ending, the bell, bedtime
 - [ ] In-game settings screen, bubble size, chattiness slider, "hrmm" sounds
 - [ ] Shared model folder across instances, Modrinth release
 
