@@ -13,6 +13,13 @@ Villagers say short, situation-aware lines when a player is near. Hand-written l
 - `VillagerChatter.java` — entrypoint; `ServerTickEvents.END_LEVEL_TICK` checks for nearby villagers once a second, handles cooldowns, sends the chat line.
 - `ChatterLines.java` — `Situation` record (profession, baby, raining, player hurt) + `pick()` from hand-written pools. The `Situation` is meant to become the AI prompt.
 
+## v0.3–0.4 additions
+- `SpeechBubbles.java` — server-side TEXT_DISPLAY entity kept above the villager; tagged `villagerchatter_bubble`, leftovers discarded on load. Needs `mixin/DisplayAccessor` + `TextDisplayAccessor` (private setters).
+- `DialogueManager.java` — trade-screen conversations. Hooked via `mixin/AbstractVillagerMixin` (setTradingPlayer). 60 s greeting cooldown per villager+player (reopen = resume), 5 min memory, 3 AI replies + fixed exit. Ollama structured JSON output (`format` schema).
+- `net/` — DialogueStateS2C, DialogueChoiceC2S payloads.
+- `client/` — `DialoguePanel` draws above MerchantScreen via Fabric screen API (`ScreenEvents.afterExtract`; 26.x GUI uses GuiGraphicsExtractor). Client mixin `AbstractContainerScreenAccessor`.
+- Mod is now required on the client too (for the trade panel). Bubbles work for vanilla clients.
+
 ## Commands
 - Build: `./gradlew build` → `build/libs/villagerchatter-<version>.jar`
 - Test in game: `./gradlew runClient`

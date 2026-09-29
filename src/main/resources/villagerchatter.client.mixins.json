@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "dev.enxvinity.villagerchatter.mixin.client",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"AbstractContainerScreenAccessor"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

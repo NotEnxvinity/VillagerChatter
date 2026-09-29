@@ -9,6 +9,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
@@ -151,6 +153,101 @@ public final class AiLines {
 		if (s.isEmpty() || s.split(" ").length > 16 || !s.matches(".*[a-zA-Z].*") || BLOCKED.matcher(s).find()) {
 			return Optional.empty();
 		}
+		return Optional.of(s);
+	}
+
+	// ------------------------------------------------------------------
+	// Trade-screen dialogue: one villager line + 3 things the player could say back.
+	// ------------------------------------------------------------------
+
+	public record Turn(String line, List<String> replies) {}
+
+	/** One message in a conversation: villager or player. */
+	public record Said(boolean byVillager, String text, List<String> replies) {}
+
+	private static final String DIALOGUE_SYSTEM = "You play a Minecraft villager talking to a player at your trading stall. "
+			+ "Respond in JSON: 'line' is what the villager says next (one or two short sentences, in character, a little funny, "
+			+ "and it should respond to what the player just said). "
+			+ "'replies' are exactly 3 short things the PLAYER could say back (each under 8 words, all different: "
+			+ "one friendly, one curious, one cheeky).";
+	private static final String DIALOGUE_EX_USER = "Villager: librarian in a plains village. Sells: Enchanted Book, Bookshelf, Glass. "
+			+ "Time: day. Weather: clear. The player just opened your trades.";
+	private static final String DIALOGUE_EX_ANSWER = "{\"line\":\"Ah, a customer! Careful, that enchanted book bites.\","
+			+ "\"replies\":[\"What's the book for?\",\"Do you read all these?\",\"Books can't bite.\"]}";
+
+	public CompletableFuture<Optional<Turn>> requestDialogue(String context, List<Said> history) {
+		JsonObject body = new JsonObject();
+		body.addProperty("model", config.model);
+		body.addProperty("stream", false);
+		body.addProperty("keep_alive", "30m");
+		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"},"
+				+ "\"replies\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":3,\"maxItems\":3}},"
+				+ "\"required\":[\"line\",\"replies\"]}"));
+
+		JsonArray messages = new JsonArray();
+		messages.add(msg("system", DIALOGUE_SYSTEM));
+		messages.add(msg("user", DIALOGUE_EX_USER));
+		messages.add(msg("assistant", DIALOGUE_EX_ANSWER));
+		messages.add(msg("user", context));
+		for (Said said : history) {
+			if (said.byVillager()) {
+				JsonObject o = new JsonObject();
+				o.addProperty("line", said.text());
+				JsonArray r = new JsonArray();
+				said.replies().forEach(r::add);
+				o.add("replies", r);
+				messages.add(msg("assistant", o.toString()));
+			} else {
+				messages.add(msg("user", "The player says: " + said.text()));
+			}
+		}
+		body.add("messages", messages);
+
+		JsonObject options = new JsonObject();
+		options.addProperty("temperature", 0.8);
+		options.addProperty("num_predict", 120);
+		body.add("options", options);
+
+		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
+				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
+				.header("Content-Type", "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+				.build();
+
+		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+				.thenApply(resp -> {
+					if (resp.statusCode() != 200) return Optional.<Turn>empty();
+					String content = JsonParser.parseString(resp.body()).getAsJsonObject()
+							.getAsJsonObject("message").get("content").getAsString();
+					JsonObject o = JsonParser.parseString(content).getAsJsonObject();
+					Optional<String> line = cleanDialogueLine(o.get("line").getAsString());
+					if (line.isEmpty()) return Optional.<Turn>empty();
+					List<String> replies = new ArrayList<>();
+					for (var el : o.getAsJsonArray("replies")) {
+						cleanReply(el.getAsString()).filter(r -> !replies.contains(r)).ifPresent(replies::add);
+						if (replies.size() == 3) break;
+					}
+					return Optional.of(new Turn(line.get(), replies));
+				})
+				.exceptionally(err -> {
+					VillagerChatter.LOGGER.info("Dialogue AI failed ({}), using a fallback line.", err.getClass().getSimpleName());
+					return Optional.empty();
+				});
+	}
+
+	/** Up to two sentences, max ~30 words. */
+	static Optional<String> cleanDialogueLine(String raw) {
+		String s = STAGE_DIRECTIONS.matcher(raw).replaceAll("").replace("\"", "").replaceAll("\\s+", " ").trim();
+		Matcher m = Pattern.compile("^(.+?[.!?])(\\s+.+?[.!?])?(\\s|$)").matcher(s);
+		if (m.find()) s = (m.group(1) + (m.group(2) == null ? "" : m.group(2))).trim();
+		if (s.isEmpty() || s.split(" ").length > 30 || BLOCKED.matcher(s).find()) return Optional.empty();
+		return Optional.of(s);
+	}
+
+	/** Player reply buttons: short and clean. */
+	static Optional<String> cleanReply(String raw) {
+		String s = STAGE_DIRECTIONS.matcher(raw).replaceAll("").replace("\"", "").replaceAll("\\s+", " ").trim();
+		if (s.isEmpty() || s.split(" ").length > 10 || s.length() > 48 || BLOCKED.matcher(s).find()) return Optional.empty();
 		return Optional.of(s);
 	}
 

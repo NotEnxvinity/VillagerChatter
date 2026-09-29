@@ -3,17 +3,31 @@
 	"id": "villagerchatter",
 	"version": "${version}",
 	"name": "Villager Chatter",
-	"description": "Villagers say random, situation-aware lines when you walk near them. (AI-powered lines coming later!)",
-	"authors": ["Enxvinity"],
+	"description": "Villagers say AI-generated, situation-aware lines in speech bubbles, and chat with you in the trading screen.",
+	"authors": [
+		"Enxvinity"
+	],
 	"license": "MIT",
 	"environment": "*",
 	"entrypoints": {
-		"main": ["dev.enxvinity.villagerchatter.VillagerChatter"]
+		"main": [
+			"dev.enxvinity.villagerchatter.VillagerChatter"
+		],
+		"client": [
+			"dev.enxvinity.villagerchatter.client.VillagerChatterClient"
+		]
 	},
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
-	}
+	},
+	"mixins": [
+		"villagerchatter.mixins.json",
+		{
+			"config": "villagerchatter.client.mixins.json",
+			"environment": "client"
+		}
+	]
 }

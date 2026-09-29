@@ -1,12 +1,18 @@
 package dev.enxvinity.villagerchatter;
 
+import dev.enxvinity.villagerchatter.net.DialogueChoiceC2S;
+import dev.enxvinity.villagerchatter.net.DialogueStateS2C;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.EntityEvent;
 import net.minecraft.world.entity.npc.villager.Villager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +41,7 @@ public class VillagerChatter implements ModInitializer {
 	private static final int MAX_IN_FLIGHT = 4;       // max AI requests running at once
 
 	/** A line that's ready to be said (filled in by the AI thread, delivered by the game thread). */
-	private record Delivery(UUID playerId, String speakerName, String line, boolean fromAi) {}
+	private record Delivery(UUID playerId, Villager speaker, ChatterLines.Situation situation, String line, boolean fromAi) {}
 
 	private final Map<UUID, Long> villagerNextTalk = new HashMap<>();
 	private final Map<UUID, Long> playerNextHear = new HashMap<>();
@@ -44,19 +50,36 @@ public class VillagerChatter implements ModInitializer {
 
 	private ChatterConfig config;
 	private AiLines ai;
+	private final SpeechBubbles bubbles = new SpeechBubbles();
+	private static DialogueManager dialogue;
+
+	public static DialogueManager dialogue() {
+		return dialogue;
+	}
 
 	@Override
 	public void onInitialize() {
 		config = ChatterConfig.load();
 		ai = new AiLines(config);
 		ai.warmUp();
+		PayloadTypeRegistry.clientboundPlay().register(DialogueStateS2C.TYPE, DialogueStateS2C.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(DialogueChoiceC2S.TYPE, DialogueChoiceC2S.CODEC);
+		dialogue = new DialogueManager(config, ai);
+		dialogue.register();
 		LOGGER.info("Villager Chatter loaded — AI {} (model {}).",
 				config.aiEnabled ? "on" : "off", config.model);
 		ServerTickEvents.END_LEVEL_TICK.register(this::onLevelTick);
+		// Clean up any bubble left behind in a saved world (e.g. the game closed mid-sentence).
+		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
+			if (entity instanceof Display.TextDisplay td && td.entityTags().contains(SpeechBubbles.TAG) && !bubbles.isOurs(td)) {
+				td.discard();
+			}
+		});
 	}
 
 	private void onLevelTick(ServerLevel level) {
 		deliverReadyLines(level);
+		bubbles.tick(level);
 
 		long now = level.getGameTime();
 		if (now % CHECK_EVERY_TICKS != 0) return;
@@ -71,7 +94,7 @@ public class VillagerChatter implements ModInitializer {
 			List<Villager> nearby = level.getEntitiesOfClass(
 					Villager.class,
 					player.getBoundingBox().inflate(config.hearingRange),
-					v -> v.isAlive() && now >= villagerNextTalk.getOrDefault(v.getUUID(), 0L)
+					v -> v.isAlive() && !v.isTrading() && now >= villagerNextTalk.getOrDefault(v.getUUID(), 0L)
 			);
 			if (nearby.isEmpty() || random.nextFloat() > config.talkChance) continue;
 
@@ -89,15 +112,16 @@ public class VillagerChatter implements ModInitializer {
 				ai.requestLine(situation).whenComplete((result, err) -> {
 					inFlight.decrementAndGet();
 					boolean gotAi = err == null && result != null && result.isPresent();
-					ready.add(new Delivery(playerId, situation.displayName(), gotAi ? result.get() : fallback, gotAi));
+					ready.add(new Delivery(playerId, speaker, situation, gotAi ? result.get() : fallback, gotAi));
 				});
 			} else {
-				ready.add(new Delivery(playerId, situation.displayName(), fallback, false));
+				ready.add(new Delivery(playerId, speaker, situation, fallback, false));
 			}
 		}
 
 		// Housekeeping so the maps don't grow forever.
 		if (now % (20 * 60 * 5) == 0) {
+			dialogue.tick(now);
 			villagerNextTalk.values().removeIf(t -> t < now);
 			playerNextHear.values().removeIf(t -> t < now);
 		}
@@ -106,13 +130,34 @@ public class VillagerChatter implements ModInitializer {
 	private void deliverReadyLines(ServerLevel level) {
 		Delivery d;
 		while ((d = ready.poll()) != null) {
+			Villager v = d.speaker();
+			if (v.level() != level) { ready.add(d); break; } // belongs to another dimension's tick
 			ServerPlayer player = level.getServer().getPlayerList().getPlayer(d.playerId());
-			if (player == null) continue; // they logged off while the AI was thinking
-			player.sendSystemMessage(
-					Component.literal("<" + d.speakerName() + "> ").withStyle(ChatFormatting.GREEN)
-							.append(Component.literal(d.line()).withStyle(ChatFormatting.WHITE))
-			);
-			LOGGER.info("[{}] <{}> {}", d.fromAi() ? "AI" : "hand-written", d.speakerName(), d.line());
+			String name = d.situation().displayName();
+
+			if (config.showBubbles && v.isAlive()) bubbles.show(level, v, d.line());
+			if ((config.showInChat || !config.showBubbles) && player != null) {
+				player.sendSystemMessage(
+						Component.literal("<" + name + "> ").withStyle(ChatFormatting.GREEN)
+								.append(Component.literal(d.line()).withStyle(ChatFormatting.WHITE))
+				);
+			}
+			if (config.particles && v.isAlive()) playMood(level, v, d.situation());
+			LOGGER.info("[{}] <{}> {}", d.fromAi() ? "AI" : "hand-written", name, d.line());
+		}
+	}
+
+	/** Vanilla villager particles: angry puff, sweat drops, hearts, or green sparkles. */
+	private static void playMood(ServerLevel level, Villager v, ChatterLines.Situation s) {
+		RandomSource r = level.getRandom();
+		if (s.villagerHurt() || s.raid()) {
+			level.broadcastEntityEvent(v, EntityEvent.VILLAGER_ANGRY);
+		} else if (s.monsterNearby()) {
+			level.broadcastEntityEvent(v, EntityEvent.VILLAGER_SWEAT);
+		} else if (s.baby() && r.nextFloat() < 0.4f) {
+			level.broadcastEntityEvent(v, EntityEvent.LOVE_HEARTS);
+		} else if (r.nextFloat() < 0.3f) {
+			level.broadcastEntityEvent(v, EntityEvent.VILLAGER_HAPPY);
 		}
 	}
 }

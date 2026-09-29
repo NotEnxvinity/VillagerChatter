@@ -1,0 +1,13 @@
+{
+	"required": true,
+	"package": "dev.enxvinity.villagerchatter.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"DisplayAccessor",
+		"TextDisplayAccessor",
+		"AbstractVillagerMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

@@ -22,6 +22,10 @@ public final class ChatterConfig {
 	public float talkChance = 0.15f;
 	public int villagerCooldownSeconds = 30;
 	public int playerCooldownSeconds = 8;
+	public boolean showBubbles = true;
+	public boolean showInChat = false;
+	public boolean particles = true;
+	public boolean dialogueEnabled = true;
 
 	public static ChatterConfig load() {
 		ChatterConfig c = new ChatterConfig();
@@ -42,6 +46,10 @@ public final class ChatterConfig {
 		c.talkChance = (float) parseDouble(p, "talkChance", c.talkChance);
 		c.villagerCooldownSeconds = parseInt(p, "villagerCooldownSeconds", c.villagerCooldownSeconds);
 		c.playerCooldownSeconds = parseInt(p, "playerCooldownSeconds", c.playerCooldownSeconds);
+		c.showBubbles = Boolean.parseBoolean(p.getProperty("showBubbles", String.valueOf(c.showBubbles)));
+		c.showInChat = Boolean.parseBoolean(p.getProperty("showInChat", String.valueOf(c.showInChat)));
+		c.particles = Boolean.parseBoolean(p.getProperty("particles", String.valueOf(c.particles)));
+		c.dialogueEnabled = Boolean.parseBoolean(p.getProperty("dialogueEnabled", String.valueOf(c.dialogueEnabled)));
 		c.save(file);
 		return c;
 	}
@@ -56,6 +64,10 @@ public final class ChatterConfig {
 		p.setProperty("talkChance", String.valueOf(talkChance));
 		p.setProperty("villagerCooldownSeconds", String.valueOf(villagerCooldownSeconds));
 		p.setProperty("playerCooldownSeconds", String.valueOf(playerCooldownSeconds));
+		p.setProperty("showBubbles", String.valueOf(showBubbles));
+		p.setProperty("showInChat", String.valueOf(showInChat));
+		p.setProperty("particles", String.valueOf(particles));
+		p.setProperty("dialogueEnabled", String.valueOf(dialogueEnabled));
 		try {
 			Files.createDirectories(file.getParent());
 			try (Writer w = Files.newBufferedWriter(file)) {
