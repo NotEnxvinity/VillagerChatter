@@ -259,6 +259,64 @@ public final class AiLines {
 		return Optional.of(s);
 	}
 
+	// ------------------------------------------------------------------
+	// Small talk: a tiny overheard conversation between two villagers.
+	// ------------------------------------------------------------------
+
+	/** One overheard line: firstSpeaker = villager A. */
+	public record TalkLine(boolean firstSpeaker, String text) {}
+
+	private static final String SMALLTALK_SYSTEM = "You write a tiny overheard conversation between two Minecraft villagers, A and B. "
+			+ "2 to 4 short lines total, alternating A and B, starting with A. Each line under 14 words, in character for their job, "
+			+ "a little funny. Only mention things that exist in Minecraft. Output JSON.";
+	private static final String SMALLTALK_EX_USER = "A: librarian. B: farmer. Plains village. Time: day. Weather: raining.";
+	private static final String SMALLTALK_EX_ANSWER = "{\"lines\":[{\"who\":\"A\",\"text\":\"Your crops are drowning, you know.\"},"
+			+ "{\"who\":\"B\",\"text\":\"Drowning? They're thriving! Unlike your book sales.\"},{\"who\":\"A\",\"text\":\"Hrmm. Rude.\"}]}";
+
+	public CompletableFuture<Optional<List<TalkLine>>> requestSmallTalk(String scene) {
+		JsonObject body = new JsonObject();
+		body.addProperty("model", config.model);
+		body.addProperty("stream", false);
+		body.addProperty("keep_alive", "30m");
+		body.add("format", JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"lines\":{\"type\":\"array\",\"minItems\":2,\"maxItems\":4,"
+				+ "\"items\":{\"type\":\"object\",\"properties\":{\"who\":{\"type\":\"string\",\"enum\":[\"A\",\"B\"]},"
+				+ "\"text\":{\"type\":\"string\"}},\"required\":[\"who\",\"text\"]}}},\"required\":[\"lines\"]}"));
+		JsonArray messages = new JsonArray();
+		messages.add(msg("system", SMALLTALK_SYSTEM));
+		messages.add(msg("user", SMALLTALK_EX_USER));
+		messages.add(msg("assistant", SMALLTALK_EX_ANSWER));
+		messages.add(msg("user", scene));
+		body.add("messages", messages);
+		JsonObject options = new JsonObject();
+		options.addProperty("temperature", 0.9);
+		options.addProperty("num_predict", 200);
+		body.add("options", options);
+
+		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
+				.timeout(Duration.ofMillis(Math.max(config.aiTimeoutMs, 8000)))
+				.header("Content-Type", "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+				.build();
+		return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+				.thenApply(resp -> {
+					if (resp.statusCode() != 200) return Optional.<List<TalkLine>>empty();
+					String content = JsonParser.parseString(resp.body()).getAsJsonObject()
+							.getAsJsonObject("message").get("content").getAsString();
+					List<TalkLine> out = new ArrayList<>();
+					boolean expectA = true;
+					for (var el : JsonParser.parseString(content).getAsJsonObject().getAsJsonArray("lines")) {
+						JsonObject o = el.getAsJsonObject();
+						Optional<String> text = cleanDialogueLine(o.get("text").getAsString()).or(() -> clean(o.get("text").getAsString()));
+						if (text.isEmpty()) break; // stop at the first bad line so the exchange still makes sense
+						out.add(new TalkLine(expectA, text.get())); // force strict alternation
+						expectA = !expectA;
+						if (out.size() == 4) break;
+					}
+					return out.size() >= 2 ? Optional.of(out) : Optional.<List<TalkLine>>empty();
+				})
+				.exceptionally(err -> Optional.empty());
+	}
+
 	private static JsonObject msg(String role, String content) {
 		JsonObject o = new JsonObject();
 		o.addProperty("role", role);

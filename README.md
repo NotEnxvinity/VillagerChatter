@@ -9,6 +9,8 @@ A Fabric mod for Minecraft 26.3 where villagers say random, situation-aware line
 - [x] Stage 4 — Mod asks Ollama for lines on a background thread, falls back to hand-written lines
 - [x] v0.3 — Speech bubbles above heads + mood particles
 - [x] v0.4 — Conversations in the trading screen (villager line + 3 AI replies + "Let's just trade.")
+- [x] v0.5 — Villager memory (trades, hits, last thing said; persists), trade reactions, instant hit reactions
+- [x] v0.6 — Villagers chat with each other (overheard 2–4 line exchanges)
 - [ ] Stage 5 — Bundle the model inside the mod (java-llama.cpp)
 
 ## First-time setup (Mac)
@@ -24,7 +26,7 @@ A Fabric mod for Minecraft 26.3 where villagers say random, situation-aware line
 2. In Terminal: `ollama pull smollm2:1.7b`
 3. Launch the game. Settings live in `.minecraft/config/villagerchatter.properties` (in Prism: instance → Folder → config).
    Set `aiEnabled=false` for hand-written lines only, or `model=smollm2:360m` for the tinier model.
-   Other switches: `showBubbles`, `showInChat`, `particles`, `dialogueEnabled`.
+   Other switches: `showBubbles`, `showInChat`, `particles`, `dialogueEnabled`, `smallTalkChance`.
 4. The game log shows `[AI]` or `[hand-written]` next to each line so you can tell which is which.
 
 ## Where to tinker

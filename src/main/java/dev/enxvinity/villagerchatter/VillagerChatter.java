@@ -95,6 +95,7 @@ public class VillagerChatter implements ModInitializer {
 
 	private void onLevelTick(ServerLevel level) {
 		deliverReadyLines(level);
+		runScenes(level);
 		bubbles.tick(level);
 
 		long now = level.getGameTime();
@@ -119,6 +120,7 @@ public class VillagerChatter implements ModInitializer {
 			if (nearby.isEmpty() || random.nextFloat() > config.talkChance) continue;
 
 			Villager speaker = nearby.get(random.nextInt(nearby.size()));
+			if (ai.available() && random.nextFloat() < config.smallTalkChance && tryStartSmallTalk(level, player, speaker, now)) continue;
 			ChatterLines.Situation situation = ChatterLines.describe(level, speaker, player);
 			// Pick the fallback now, on the game thread (RandomSource isn't thread-safe).
 			String fallback = ChatterLines.pick(situation, random);
@@ -167,6 +169,83 @@ public class VillagerChatter implements ModInitializer {
 			if (config.particles && v.isAlive()) playMood(level, v, d.situation());
 			LOGGER.info("[{}] <{}> {}", d.fromAi() ? "AI" : "hand-written", name, d.line());
 		}
+	}
+
+	// ---------------- Small talk between two villagers ----------------
+
+	private record SceneLine(Villager speaker, Villager listener, String text, long at) {}
+	private final java.util.List<SceneLine> sceneLines = new java.util.ArrayList<>();
+	private final Queue<java.util.List<SceneLine>> readyScenes = new ConcurrentLinkedQueue<>();
+
+	private boolean tryStartSmallTalk(ServerLevel level, ServerPlayer player, Villager a, long now) {
+		List<Villager> partners = level.getEntitiesOfClass(Villager.class, a.getBoundingBox().inflate(4.0),
+				v -> v != a && v.isAlive() && !v.isTrading() && !v.isSleeping());
+		if (partners.isEmpty() || a.isSleeping()) return false;
+		Villager b = partners.get(level.getRandom().nextInt(partners.size()));
+		ChatterLines.Situation sa = ChatterLines.describe(level, a, player);
+		ChatterLines.Situation sb = ChatterLines.describe(level, b, player);
+		String scene = "A: " + job(sa) + ". B: " + job(sb) + ". " + capitalize(sa.biome().replace('_', ' ')) + " village. Time: "
+				+ (sa.night() ? "night" : "day") + ". Weather: " + (sa.thundering() ? "thunderstorm" : sa.raining() ? "raining" : "clear") + "."
+				+ (sa.raid() ? " The village is being raided!" : sa.monsterNearby() ? " A zombie is nearby!" : "");
+		UUID playerId = player.getUUID();
+		long hold = 20L * 30; // keep both busy while the scene is generated and played
+		villagerNextTalk.put(a.getUUID(), now + hold);
+		villagerNextTalk.put(b.getUUID(), now + hold);
+		playerNextHear.put(playerId, now + 20L * config.playerCooldownSeconds);
+		awaiting.add(playerId);
+		ai.requestSmallTalk(scene).whenComplete((result, err) -> {
+			awaiting.remove(playerId);
+			if (err != null || result == null || result.isEmpty()) return; // just skip; someone else will talk later
+			java.util.List<SceneLine> lines = new java.util.ArrayList<>();
+			for (AiLines.TalkLine t : result.get()) {
+				lines.add(new SceneLine(t.firstSpeaker() ? a : b, t.firstSpeaker() ? b : a, t.text(), 0));
+			}
+			readyScenes.add(lines);
+		});
+		LOGGER.info("[small talk] {} and {} are chatting…", sa.displayName(), sb.displayName());
+		return true;
+	}
+
+	private void runScenes(ServerLevel level) {
+		long now = level.getGameTime();
+		java.util.List<SceneLine> scene;
+		while ((scene = readyScenes.poll()) != null) {
+			if (scene.get(0).speaker().level() != level) { readyScenes.add(scene); break; }
+			long t = now;
+			for (SceneLine l : scene) {
+				sceneLines.add(new SceneLine(l.speaker(), l.listener(), l.text(), t));
+				t += Math.min(110, 45 + l.text().length() * 3L / 2); // give each line time to be read
+			}
+		}
+		java.util.Iterator<SceneLine> it = sceneLines.iterator();
+		while (it.hasNext()) {
+			SceneLine l = it.next();
+			if (l.speaker().level() != level) continue;
+			if (!l.speaker().isAlive() || !l.listener().isAlive()) { it.remove(); continue; }
+			l.speaker().getLookControl().setLookAt(l.listener());
+			l.listener().getLookControl().setLookAt(l.speaker());
+			if (now < l.at()) continue;
+			it.remove();
+			if (config.showBubbles) bubbles.show(level, l.speaker(), l.text());
+			String name = ChatterLines.displayName(l.speaker());
+			if (config.showInChat || !config.showBubbles) {
+				for (ServerPlayer p : level.players()) {
+					if (p.distanceToSqr(l.speaker()) < 24 * 24) {
+						p.sendSystemMessage(Component.literal("<" + name + "> ").withStyle(ChatFormatting.GREEN)
+								.append(Component.literal(l.text()).withStyle(ChatFormatting.WHITE)));
+					}
+				}
+			}
+			LOGGER.info("[small talk] <{}> {}", name, l.text());
+		}
+	}
+
+	private static String job(ChatterLines.Situation s) {
+		return s.baby() ? "baby villager" : s.profession().equals("none") ? "unemployed villager" : s.profession();
+	}
+
+	private static String capitalize(String s) {
+		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
 	}
 
 	/** A player hit a villager: remember it, and react right away (skips the normal cooldown). */

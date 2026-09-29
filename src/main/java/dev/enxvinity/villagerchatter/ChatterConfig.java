@@ -26,6 +26,7 @@ public final class ChatterConfig {
 	public boolean showInChat = false;
 	public boolean particles = true;
 	public boolean dialogueEnabled = true;
+	public float smallTalkChance = 0.35f;
 
 	public static ChatterConfig load() {
 		ChatterConfig c = new ChatterConfig();
@@ -50,6 +51,7 @@ public final class ChatterConfig {
 		c.showInChat = Boolean.parseBoolean(p.getProperty("showInChat", String.valueOf(c.showInChat)));
 		c.particles = Boolean.parseBoolean(p.getProperty("particles", String.valueOf(c.particles)));
 		c.dialogueEnabled = Boolean.parseBoolean(p.getProperty("dialogueEnabled", String.valueOf(c.dialogueEnabled)));
+		c.smallTalkChance = (float) parseDouble(p, "smallTalkChance", c.smallTalkChance);
 		c.save(file);
 		return c;
 	}
@@ -68,6 +70,7 @@ public final class ChatterConfig {
 		p.setProperty("showInChat", String.valueOf(showInChat));
 		p.setProperty("particles", String.valueOf(particles));
 		p.setProperty("dialogueEnabled", String.valueOf(dialogueEnabled));
+		p.setProperty("smallTalkChance", String.valueOf(smallTalkChance));
 		try {
 			Files.createDirectories(file.getParent());
 			try (Writer w = Files.newBufferedWriter(file)) {

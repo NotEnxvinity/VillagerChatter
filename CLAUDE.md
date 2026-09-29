@@ -20,6 +20,12 @@ Villagers say short, situation-aware lines when a player is near. Hand-written l
 - `client/` — `DialoguePanel` draws above MerchantScreen via Fabric screen API (`ScreenEvents.afterExtract`; 26.x GUI uses GuiGraphicsExtractor). Client mixin `AbstractContainerScreenAccessor`.
 - Mod is now required on the client too (for the trade panel). Bubbles work for vanilla clients.
 
+## v0.5–0.6 additions
+- `VillagerMemory.java` — persistent Fabric data attachment on each villager: player UUID -> (trades, hits, last line). `describe()` mixes it with vanilla `getPlayerReputation` for prompts.
+- `mixin/AbstractVillagerTradeMixin` — notifyTrade -> sparkle + DialogueManager.onTraded (AI reacts, max every 5 s).
+- `ServerLivingEntityEvents.AFTER_DAMAGE` — instant hand-written OUCH bubble, angry particles, hit remembered.
+- Small talk: `AiLines.requestSmallTalk` (JSON lines A/B) scheduled as alternating bubbles in `VillagerChatter.runScenes`; villagers look at each other.
+
 ## Commands
 - Build: `./gradlew build` → `build/libs/villagerchatter-<version>.jar`
 - Test in game: `./gradlew runClient`

@@ -73,6 +73,12 @@ public final class ChatterLines {
 		);
 	}
 
+	public static String displayName(Villager villager) {
+		String profession = shortName(villager.getVillagerData().profession().getRegisteredName());
+		return villager.isBaby() ? "Baby Villager"
+				: (profession.equals("none") ? "Villager" : capitalize(profession.replace('_', ' ')));
+	}
+
 	public static String pick(Situation s, RandomSource random) {
 		List<String> pool = new ArrayList<>();
 
