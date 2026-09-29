@@ -165,17 +165,22 @@ public final class AiLines {
 	/** One message in a conversation: villager or player. */
 	public record Said(boolean byVillager, String text, List<String> replies) {}
 
-	private static final String DIALOGUE_SYSTEM = "You play a Minecraft villager talking to a player at your trading stall. "
-			+ "Respond in JSON: 'line' is what the villager says next (one or two short sentences, in character, a little funny, "
-			+ "and it should respond to what the player just said). "
-			+ "'replies' are exactly 3 short things the PLAYER could say back (each under 8 words, all different: "
-			+ "one friendly, one curious, one cheeky).";
-	private static final String DIALOGUE_EX_USER = "Villager: librarian in a plains village. Sells: Enchanted Book, Bookshelf, Glass. "
-			+ "Time: day. Weather: clear. The player just opened your trades.";
-	private static final String DIALOGUE_EX_ANSWER = "{\"line\":\"Ah, a customer! Careful, that enchanted book bites.\","
-			+ "\"replies\":[\"What's the book for?\",\"Do you read all these?\",\"Books can't bite.\"]}";
+	private static String dialogueSystem(String scene) {
+		return "You are roleplaying ONE Minecraft villager talking to a player at your trading stall.\n"
+				+ "WHO YOU ARE: " + scene + "\n"
+				+ "Stay in character as exactly this villager. Never claim a different job.\n"
+				+ "Minecraft facts: villagers trade items for emeralds; emeralds are money, not treasure. "
+				+ "Only talk about things that exist in the Minecraft world (no real-world books, places, or people).\n"
+				+ "Respond in JSON. 'line' = what you say next: one or two short sentences, in character, a little funny, "
+				+ "reacting to what the player just said. 'replies' = exactly 3 short things the PLAYER could say back, "
+				+ "each 2 to 5 words, all different (one friendly, one curious, one cheeky).";
+	}
 
-	public CompletableFuture<Optional<Turn>> requestDialogue(String context, List<Said> history) {
+	private static final String DIALOGUE_EX_EVENT = "The player just opened your trades.";
+	private static final String DIALOGUE_EX_ANSWER = "{\"line\":\"Well, look who it is! Browsing or buying?\","
+			+ "\"replies\":[\"Just browsing.\",\"What's popular today?\",\"Buying, if it's cheap.\"]}";
+
+	public CompletableFuture<Optional<Turn>> requestDialogue(String scene, String event, List<Said> history) {
 		JsonObject body = new JsonObject();
 		body.addProperty("model", config.model);
 		body.addProperty("stream", false);
@@ -185,10 +190,10 @@ public final class AiLines {
 				+ "\"required\":[\"line\",\"replies\"]}"));
 
 		JsonArray messages = new JsonArray();
-		messages.add(msg("system", DIALOGUE_SYSTEM));
-		messages.add(msg("user", DIALOGUE_EX_USER));
+		messages.add(msg("system", dialogueSystem(scene)));
+		messages.add(msg("user", DIALOGUE_EX_EVENT));
 		messages.add(msg("assistant", DIALOGUE_EX_ANSWER));
-		messages.add(msg("user", context));
+		messages.add(msg("user", event));
 		for (Said said : history) {
 			if (said.byVillager()) {
 				JsonObject o = new JsonObject();
@@ -205,7 +210,7 @@ public final class AiLines {
 
 		JsonObject options = new JsonObject();
 		options.addProperty("temperature", 0.8);
-		options.addProperty("num_predict", 120);
+		options.addProperty("num_predict", 220);
 		body.add("options", options);
 
 		HttpRequest req = HttpRequest.newBuilder(URI.create(config.ollamaUrl + "/api/chat"))
@@ -240,14 +245,17 @@ public final class AiLines {
 		String s = STAGE_DIRECTIONS.matcher(raw).replaceAll("").replace("\"", "").replaceAll("\\s+", " ").trim();
 		Matcher m = Pattern.compile("^(.+?[.!?])(\\s+.+?[.!?])?(\\s|$)").matcher(s);
 		if (m.find()) s = (m.group(1) + (m.group(2) == null ? "" : m.group(2))).trim();
-		if (s.isEmpty() || s.split(" ").length > 30 || BLOCKED.matcher(s).find()) return Optional.empty();
+		// Reject fragments like "I love" (the model sometimes breaks off mid-sentence).
+		if (s.isEmpty() || s.split(" ").length < 3 || s.split(" ").length > 30 || !s.matches(".*[.!?]$")
+				|| BLOCKED.matcher(s).find()) return Optional.empty();
 		return Optional.of(s);
 	}
 
 	/** Player reply buttons: short and clean. */
 	static Optional<String> cleanReply(String raw) {
 		String s = STAGE_DIRECTIONS.matcher(raw).replaceAll("").replace("\"", "").replaceAll("\\s+", " ").trim();
-		if (s.isEmpty() || s.split(" ").length > 10 || s.length() > 48 || BLOCKED.matcher(s).find()) return Optional.empty();
+		if (s.isEmpty() || s.split(" ").length < 2 || s.split(" ").length > 12 || s.length() > 70
+				|| s.matches(".*[,:;]$") || BLOCKED.matcher(s).find()) return Optional.empty();
 		return Optional.of(s);
 	}
 

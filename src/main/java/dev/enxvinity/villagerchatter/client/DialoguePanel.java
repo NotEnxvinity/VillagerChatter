@@ -10,6 +10,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
@@ -37,6 +38,7 @@ public final class DialoguePanel {
 	private final MerchantScreen screen;
 	private final Font font;
 	private final Button[] buttons = new Button[4];
+	private final String[] lastLabels = new String[4];
 
 	private DialoguePanel(MerchantScreen screen) {
 		this.screen = screen;
@@ -93,7 +95,12 @@ public final class DialoguePanel {
 			b.visible = show;
 			if (!show) continue;
 			String label = i < 3 ? (i < s.replies().size() ? s.replies().get(i) : "…") : EXIT;
-			b.setMessage(Component.literal(fit(label, bw - 8)));
+			String shown = fit(label, bw - 8);
+			b.setMessage(Component.literal(shown));
+			if (!label.equals(lastLabels[i])) { // hover shows the full reply when it's cut off
+				b.setTooltip(shown.equals(label) ? null : Tooltip.create(Component.literal(label)));
+				lastLabels[i] = label;
+			}
 			b.active = !s.thinking() && (i == 3 || i < s.replies().size());
 			b.setWidth(bw);
 			b.setX(left() + (i % 2) * (bw + GAP));

@@ -47,6 +47,7 @@ public final class DialogueManager {
 		long lastActive;
 		long lastGreeting = Long.MIN_VALUE / 2;
 		long lastChoice = Long.MIN_VALUE / 2;
+		String opener = "The player just opened your trades.";
 
 		Conversation(UUID villagerId) { this.villagerId = villagerId; }
 	}
@@ -95,11 +96,9 @@ public final class DialogueManager {
 		conv.lastGreeting = now;
 		conv.lastActive = now;
 		boolean returning = !conv.history.isEmpty();
-		String context = context(s, villager) + (returning
-				? " The player came back and opened your trades again."
-				: " The player just opened your trades.");
+		conv.opener = returning ? "The player came back and opened your trades again." : "The player just opened your trades.";
 		String fallback = ChatterLines.pick(s, level.getRandom());
-		generate(player, villager, conv, context, fallback);
+		generate(player, villager, conv, context(s, villager), conv.opener, fallback);
 	}
 
 	private void onChoice(ServerPlayer player, int index) {
@@ -126,16 +125,16 @@ public final class DialogueManager {
 		conv.history.add(new AiLines.Said(false, said, List.of()));
 		ChatterLines.Situation s = ChatterLines.describe(level, villager, player);
 		String fallback = ChatterLines.pick(s, level.getRandom());
-		generate(player, villager, conv, context(s, villager) + " You are in the middle of a conversation.", fallback);
+		generate(player, villager, conv, context(s, villager), conv.opener, fallback);
 	}
 
-	private void generate(ServerPlayer player, Villager villager, Conversation conv, String context, String fallbackLine) {
+	private void generate(ServerPlayer player, Villager villager, Conversation conv, String scene, String event, String fallbackLine) {
 		conv.thinking = true;
 		send(player, conv);
 
 		List<AiLines.Said> history = new ArrayList<>(conv.history);
 		var future = ai.available()
-				? ai.requestDialogue(context, history)
+				? ai.requestDialogue(scene, event, history)
 				: java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.<AiLines.Turn>empty());
 
 		future.whenComplete((result, err) -> player.level().getServer().execute(() -> {
@@ -182,7 +181,7 @@ public final class DialogueManager {
 		}
 		String job = s.baby() ? "baby villager" : (s.profession().equals("none") ? "unemployed villager" : s.profession());
 		StringBuilder sb = new StringBuilder();
-		sb.append("Villager: ").append(job).append(" in a ").append(s.biome().replace('_', ' ')).append(" village. ");
+		sb.append("a ").append(job).append(" in a ").append(s.biome().replace('_', ' ')).append(" village. ");
 		if (!sells.isEmpty()) sb.append("Sells: ").append(String.join(", ", sells)).append(". ");
 		sb.append("Time: ").append(s.night() ? "night" : "day").append(". ");
 		sb.append("Weather: ").append(s.thundering() ? "thunderstorm" : s.raining() ? "raining" : "clear").append(".");
