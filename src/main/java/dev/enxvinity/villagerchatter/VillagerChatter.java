@@ -47,6 +47,8 @@ public class VillagerChatter implements ModInitializer {
 	private final Map<UUID, Long> playerNextHear = new HashMap<>();
 	private final Queue<Delivery> ready = new ConcurrentLinkedQueue<>();
 	private final AtomicInteger inFlight = new AtomicInteger();
+	/** Players waiting on an AI line (so a slow reply can't stack up with the next one). */
+	private final java.util.Set<UUID> awaiting = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	private ChatterConfig config;
 	private AiLines ai;
@@ -90,6 +92,10 @@ public class VillagerChatter implements ModInitializer {
 
 		for (ServerPlayer player : level.players()) {
 			if (now < playerNextHear.getOrDefault(player.getUUID(), 0L)) continue;
+			// One speaker at a time: wait until nobody nearby is mid-sentence (plus a short pause),
+			// and until this player's last AI request has come back.
+			if (awaiting.contains(player.getUUID())) continue;
+			if (bubbles.anyActiveNear(level, player.getX(), player.getY(), player.getZ(), config.hearingRange * 3, 60)) continue;
 
 			List<Villager> nearby = level.getEntitiesOfClass(
 					Villager.class,
@@ -109,8 +115,10 @@ public class VillagerChatter implements ModInitializer {
 
 			if (ai.available() && inFlight.get() < MAX_IN_FLIGHT) {
 				inFlight.incrementAndGet();
+				awaiting.add(playerId);
 				ai.requestLine(situation).whenComplete((result, err) -> {
 					inFlight.decrementAndGet();
+					awaiting.remove(playerId);
 					boolean gotAi = err == null && result != null && result.isPresent();
 					ready.add(new Delivery(playerId, speaker, situation, gotAi ? result.get() : fallback, gotAi));
 				});

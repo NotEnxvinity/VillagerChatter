@@ -61,6 +61,7 @@ public final class SpeechBubbles {
 			Bubble b = it.next().getValue();
 			if (b.display().level() != level) continue;
 			if (now >= b.expiresAt() || !b.villager().isAlive() || b.display().isRemoved()) {
+				recentlyEnded.put(new double[]{b.villager().getX(), b.villager().getZ()}, new long[]{now});
 				b.display().discard();
 				it.remove();
 				continue;
@@ -69,6 +70,27 @@ public final class SpeechBubbles {
 			b.display().setPos(v.getX(), v.getY() + v.getBbHeight() + ABOVE_HEAD, v.getZ());
 		}
 	}
+
+	/** Is any villager near this spot still "talking" (bubble up, or it just ended)? */
+	public boolean anyActiveNear(ServerLevel level, double x, double y, double z, double radius, long quietTicks) {
+		long now = level.getGameTime();
+		double r2 = radius * radius;
+		for (Bubble b : bubbles.values()) {
+			if (b.display().level() != level) continue;
+			if (b.villager().distanceToSqr(x, y, z) <= r2) return true;
+		}
+		for (var e : recentlyEnded.entrySet()) {
+			if (now - e.getValue()[0] < quietTicks) {
+				double dx = e.getKey()[0] - x, dz = e.getKey()[1] - z;
+				if (dx * dx + dz * dz <= r2) return true;
+			}
+		}
+		recentlyEnded.entrySet().removeIf(e -> now - e.getValue()[0] >= quietTicks);
+		return false;
+	}
+
+	/** Where and when recent bubbles ended, for a short quiet gap between speakers. */
+	private final Map<double[], long[]> recentlyEnded = new java.util.IdentityHashMap<>();
 
 	public boolean isOurs(Display.TextDisplay display) {
 		for (Bubble b : bubbles.values()) if (b.display() == display) return true;
