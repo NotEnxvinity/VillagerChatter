@@ -4,6 +4,10 @@ plugins {
 
 repositories {
 	// Loom adds Minecraft/Fabric repositories automatically.
+	maven {
+		name = 'TerraformersMC'
+		url = 'https://maven.terraformersmc.com/releases/'
+	}
 }
 
 loom {
@@ -18,6 +22,10 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// Mod Menu is optional: only needed at compile time for the "Configure" button hook.
+	compileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+	// ...and present when testing with ./gradlew runClient, so the button can be tried.
+	localRuntime "com.terraformersmc:modmenu:${project.modmenu_version}"
 }
 
 processResources {

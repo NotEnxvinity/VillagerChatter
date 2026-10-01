@@ -159,6 +159,8 @@ public final class DialogueManager {
 			if (config.particles && villager.isAlive()) {
 				villager.level().broadcastEntityEvent(villager, EntityEvent.VILLAGER_HAPPY);
 			}
+			// The same "hrmm" villagers make while you browse their trades.
+			if (villager.getTradingPlayer() == player) VillagerChatter.hrmm(villager, net.minecraft.sounds.SoundEvents.VILLAGER_TRADE);
 			// Only send if they're still looking at this villager's trades.
 			String key = activeByPlayer.get(player.getUUID());
 			if (key != null && conversations.get(key) == conv && villager.getTradingPlayer() == player) {

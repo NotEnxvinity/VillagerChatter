@@ -11,7 +11,7 @@ import java.util.Properties;
 
 /**
  * Settings, saved in .minecraft/config/villagerchatter.properties.
- * Edit that file (then restart the game) to change them.
+ * Most of them can be changed in game (Mod Menu, or /villagerchatter settings); the rest by editing the file.
  */
 public final class ChatterConfig {
 	public boolean aiEnabled = true;
@@ -29,9 +29,25 @@ public final class ChatterConfig {
 	public boolean particles = true;
 	public boolean dialogueEnabled = true;
 	public float smallTalkChance = 0.35f;
+	/** Play vanilla villager "hrmm" sounds when a villager says something. */
+	public boolean sounds = true;
+	/** Speech bubble size in percent (100 = the original size). */
+	public int bubbleSize = 100;
+	/** Where the AI files live. Empty = the shared folder for this OS (see LocalRuntime.defaultDataDir()). */
+	public String modelFolder = "";
+
+	private Path file;
+
+	private static ChatterConfig current;
+
+	/** The loaded settings (the same object the game uses, so changes apply right away). */
+	public static ChatterConfig get() {
+		return current;
+	}
 
 	public static ChatterConfig load() {
 		ChatterConfig c = new ChatterConfig();
+		current = c;
 		Path file = FabricLoader.getInstance().getConfigDir().resolve("villagerchatter.properties");
 		Properties p = new Properties();
 		if (Files.exists(file)) {
@@ -57,13 +73,36 @@ public final class ChatterConfig {
 		c.particles = Boolean.parseBoolean(p.getProperty("particles", String.valueOf(c.particles)));
 		c.dialogueEnabled = Boolean.parseBoolean(p.getProperty("dialogueEnabled", String.valueOf(c.dialogueEnabled)));
 		c.smallTalkChance = (float) parseDouble(p, "smallTalkChance", c.smallTalkChance);
-		c.save(file);
+		c.sounds = Boolean.parseBoolean(p.getProperty("sounds", String.valueOf(c.sounds)));
+		c.bubbleSize = Math.max(50, Math.min(200, parseInt(p, "bubbleSize", c.bubbleSize)));
+		c.modelFolder = p.getProperty("modelFolder", c.modelFolder).trim();
+		c.talkChance = clamp01(c.talkChance);
+		c.smallTalkChance = clamp01(c.smallTalkChance);
+		c.file = file;
+		c.save();
 		return c;
 	}
 
-	private void save(Path file) {
+	/** Puts everything on the settings screen back to how a fresh install has it (file-only settings are kept). */
+	public void resetToDefaults() {
+		ChatterConfig d = new ChatterConfig();
+		aiEnabled = d.aiEnabled;
+		talkChance = d.talkChance;
+		smallTalkChance = d.smallTalkChance;
+		dialogueEnabled = d.dialogueEnabled;
+		showBubbles = d.showBubbles;
+		showInChat = d.showInChat;
+		bubbleSize = d.bubbleSize;
+		particles = d.particles;
+		sounds = d.sounds;
+		modelFolder = d.modelFolder;
+		save();
+	}
+
+	public void save() {
+		if (file == null) return;
 		Properties p = new Properties();
-		p.setProperty("configVersion", "3");
+		p.setProperty("configVersion", "4");
 		p.setProperty("aiEnabled", String.valueOf(aiEnabled));
 		p.setProperty("backend", backend);
 		p.setProperty("ollamaUrl", ollamaUrl);
@@ -78,14 +117,21 @@ public final class ChatterConfig {
 		p.setProperty("particles", String.valueOf(particles));
 		p.setProperty("dialogueEnabled", String.valueOf(dialogueEnabled));
 		p.setProperty("smallTalkChance", String.valueOf(smallTalkChance));
+		p.setProperty("sounds", String.valueOf(sounds));
+		p.setProperty("bubbleSize", String.valueOf(bubbleSize));
+		p.setProperty("modelFolder", modelFolder);
 		try {
 			Files.createDirectories(file.getParent());
 			try (Writer w = Files.newBufferedWriter(file)) {
-				p.store(w, "Villager Chatter settings. aiEnabled=false uses only hand-written lines. backend=builtin needs nothing installed (downloads Qwen3-4B once). backend=ollama uses Ollama with the model below: qwen3:4b (best), smollm2:1.7b (lighter), nemotron-mini.");
+				p.store(w, "Villager Chatter settings. aiEnabled=false uses only hand-written lines. backend=builtin needs nothing installed (downloads Qwen3-4B once). backend=ollama uses Ollama with the model below: qwen3:4b (best), smollm2:1.7b (lighter), nemotron-mini. modelFolder empty = the shared folder for all your instances.");
 			}
 		} catch (IOException e) {
 			VillagerChatter.LOGGER.warn("Couldn't write {}", file, e);
 		}
+	}
+
+	private static float clamp01(float v) {
+		return Math.max(0f, Math.min(1f, v));
 	}
 
 	private static int parseInt(Properties p, String k, int d) {

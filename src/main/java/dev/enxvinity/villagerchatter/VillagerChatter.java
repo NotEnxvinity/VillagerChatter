@@ -15,6 +15,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.EntityEvent;
@@ -46,7 +48,11 @@ public class VillagerChatter implements ModInitializer {
 	private static final int MAX_IN_FLIGHT = 4;       // max AI requests running at once
 
 	/** A line that's ready to be said (filled in by the AI thread, delivered by the game thread). */
-	private record Delivery(UUID playerId, Villager speaker, ChatterLines.Situation situation, String line, boolean fromAi) {}
+	private record Delivery(UUID playerId, Villager speaker, ChatterLines.Situation situation, String line, boolean fromAi, SoundEvent sound) {
+		Delivery(UUID playerId, Villager speaker, ChatterLines.Situation situation, String line, boolean fromAi) {
+			this(playerId, speaker, situation, line, fromAi, null);
+		}
+	}
 
 	private final Map<UUID, Long> villagerNextTalk = new HashMap<>();
 	private final Map<UUID, Long> playerNextHear = new HashMap<>();
@@ -69,6 +75,33 @@ public class VillagerChatter implements ModInitializer {
 
 	public static DialogueManager dialogue() {
 		return dialogue;
+	}
+
+	public ChatterConfig config() {
+		return config;
+	}
+
+	public AiLines ai() {
+		return ai;
+	}
+
+	/** Called by the settings screen after a change: save, and start/stop the AI if it was switched. */
+	public void applySettings() {
+		config.save();
+		ai.onSettingsChanged();
+	}
+
+	/** The villager "hrmm" that goes with a line (vanilla sounds, in the villager's own voice pitch). */
+	public static void hrmm(Villager v, SoundEvent sound) {
+		ChatterConfig c = ChatterConfig.get();
+		if (c == null || !c.sounds || sound == null || !v.isAlive() || v.isSilent()) return;
+		v.playSound(sound, 1.0f, v.getVoicePitch());
+	}
+
+	/** Which vanilla villager sound fits the mood: "hrmm" normally, a grumpy "hm-mm" when upset or scared. */
+	private static SoundEvent soundFor(ChatterLines.Situation s) {
+		if (s.villagerHurt() || s.raid() || s.monsterNearby()) return SoundEvents.VILLAGER_NO;
+		return SoundEvents.VILLAGER_AMBIENT;
 	}
 
 	@Override
@@ -200,6 +233,7 @@ public class VillagerChatter implements ModInitializer {
 				);
 			}
 			if (config.particles && v.isAlive()) playMood(level, v, d.situation());
+			hrmm(v, d.sound() != null ? d.sound() : soundFor(d.situation()));
 			LOGGER.info("[{}] <{}> {}", d.fromAi() ? "AI" : "hand-written", name, d.line());
 		}
 	}
@@ -260,6 +294,7 @@ public class VillagerChatter implements ModInitializer {
 			if (now < l.at()) continue;
 			it.remove();
 			if (config.showBubbles) bubbles.show(level, l.speaker(), l.text());
+			hrmm(l.speaker(), SoundEvents.VILLAGER_AMBIENT);
 			String name = ChatterLines.displayName(l.speaker());
 			if (config.showInChat || !config.showBubbles) {
 				for (ServerPlayer p : level.players()) {
@@ -321,13 +356,17 @@ public class VillagerChatter implements ModInitializer {
 		ChatterLines.Situation situation = ChatterLines.describe(level, v, listener);
 		String fallback = fallbacks.get(level.getRandom().nextInt(fallbacks.size()));
 		UUID playerId = listener.getUUID();
+		// Happy news gets a "yes" hrmm, alarming news a "no".
+		SoundEvent sound = particle == EntityEvent.VILLAGER_HAPPY ? SoundEvents.VILLAGER_YES
+				: particle == EntityEvent.VILLAGER_ANGRY || particle == EntityEvent.VILLAGER_SWEAT ? SoundEvents.VILLAGER_NO
+				: SoundEvents.VILLAGER_AMBIENT;
 		if (ai.available()) {
 			ai.requestLine(situation, event).whenComplete((result, err) -> {
 				boolean gotAi = err == null && result != null && result.isPresent();
-				ready.add(new Delivery(playerId, v, situation, gotAi ? result.get() : fallback, gotAi));
+				ready.add(new Delivery(playerId, v, situation, gotAi ? result.get() : fallback, gotAi, sound));
 			});
 		} else {
-			ready.add(new Delivery(playerId, v, situation, fallback, false));
+			ready.add(new Delivery(playerId, v, situation, fallback, false, sound));
 		}
 		LOGGER.info("[event] {}: {}", situation.displayName(), event);
 	}
@@ -398,6 +437,7 @@ public class VillagerChatter implements ModInitializer {
 		if (config.showBubbles) bubbles.show(level, v, line);
 		else player.sendSystemMessage(Component.literal("<Villager> ").withStyle(ChatFormatting.GREEN).append(Component.literal(line)));
 		if (config.particles) level.broadcastEntityEvent(v, EntityEvent.VILLAGER_SWEAT);
+		hrmm(v, SoundEvents.VILLAGER_NO);
 		villagerNextTalk.put(v.getUUID(), now + 20L * config.villagerCooldownSeconds);
 	}
 

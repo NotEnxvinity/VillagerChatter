@@ -12,19 +12,34 @@
 - **Jobless villagers talk too.** Nitwits, unemployed villagers and kids have nothing to trade, so right-clicking them gets a line instead of just a head shake.
 - **World reactions.** Villagers panic when a raid starts, celebrate (or mourn) when it ends, react when someone rings the village bell, and mutter a goodnight as they climb into bed.
 - **Villager small talk.** Two villagers standing together sometimes have a short overheard exchange, and they look at each other while they talk.
+- **Villager sounds.** Every line comes with the villager's own "hrmm": a happy one for good news, a grumpy one when they're upset or scared.
+- **In-game settings.** Chattiness, small talk, bubble size, bubbles or chat, sounds, particles and the AI itself, all on one screen (see below).
 - **Always works.** If the AI is off, loading, or says something strange, villagers fall back to hand-written lines.
 
 ## Install
 1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3, plus [Fabric API](https://modrinth.com/mod/fabric-api).
 2. Put `villagerchatter-<version>.jar` in your `mods` folder (build it yourself, see below, or grab a release).
-3. Launch. The first time, the mod downloads its AI (see below). Villagers use simple lines until chat says **"Villagers are now fully awake."**
+3. Optional: install [Mod Menu](https://modrinth.com/mod/modmenu) for a Configure button.
+4. Launch. The first time, the mod downloads its AI (see below). Villagers use simple lines until chat says **"Villagers are now fully awake."**
+
+Upgrading? Delete the old `villagerchatter-*.jar` from your `mods` folder first.
 
 **Tested on macOS (Apple Silicon) and SteamOS (Linux).** Windows builds of the AI are included and should work the same way.
 
 The mod needs to be on the server, or in your singleplayer game, for villagers to talk. It needs to be on the client for the trade-screen conversation panel. Speech bubbles show up even for players without the mod.
 
 ## How the AI works
-On first launch the mod downloads two things into `.minecraft/villagerchatter/`:
+On first launch the mod downloads two things into one folder that **all your Minecraft instances share**, so the 2.5 GB model is only downloaded once:
+
+| OS | Folder |
+|---|---|
+| macOS | `~/Library/Application Support/VillagerChatter/` |
+| Windows | `%LOCALAPPDATA%\VillagerChatter\` |
+| Linux / SteamOS | `~/.local/share/villagerchatter/` (Flatpak launchers like Prism keep it inside their own sandbox, still shared by all their instances) |
+
+You can pick a different folder in the settings (AI Files Folder). Upgrading from 0.9 or older? Your existing download in `.minecraft/villagerchatter/` is moved over automatically, no re-download.
+
+What gets downloaded:
 
 | File | From | Size |
 |---|---|---|
@@ -33,22 +48,26 @@ On first launch the mod downloads two things into `.minecraft/villagerchatter/`:
 
 Both are checked against pinned SHA-256 hashes before use. The server runs in the background on a random port that **only listens on your own computer (127.0.0.1)**, uses your GPU when it can (Metal on Mac, Vulkan on Windows/Linux, falling back to CPU), and shuts down when the game closes. Nothing you do in game is sent anywhere.
 
-Plan on about 3 GB of free RAM for the AI. Its log is at `villagerchatter/llama-server.log`.
+Plan on about 3 GB of free RAM for the AI (switching the AI off in the settings frees it). Its log is at `.minecraft/villagerchatter/llama-server.log`.
 
 Prefer Ollama? Set `backend=ollama` in the config and the mod will use your Ollama install instead (model set by `model=`, default `qwen3:4b`).
 
-## Config
-`.minecraft/config/villagerchatter.properties`
+## Settings
+Open them from **Mod Menu** (Configure button) or type **`/villagerchatter settings`** in chat.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `aiEnabled` | `true` | `false` = hand-written lines only |
-| `backend` | `builtin` | `builtin` or `ollama` |
-| `showBubbles` / `showInChat` | `true` / `false` | where lines appear |
-| `particles` | `true` | mood particles |
-| `dialogueEnabled` | `true` | trade-screen conversations |
-| `smallTalkChance` | `0.35` | how often villagers chat with each other |
-| `talkChance`, `hearingRange`, `villagerCooldownSeconds`, `playerCooldownSeconds` | | how chatty villagers are |
+| Chattiness | 15% | how likely a nearby villager is to speak each second |
+| Small Talk | 35% | how often villagers chat with each other instead |
+| Trade Conversations | On | the conversation panel in the trading screen |
+| Show Lines | Bubbles | bubbles, chat, or both |
+| Bubble Size | 100% | speech bubble size, 50–200% |
+| Villager Sounds | On | the "hrmm" with each line |
+| Mood Particles | On | sparkles, angry clouds, sweat drops, hearts |
+| Villager AI | On | off = hand-written lines only, and the AI's memory is freed |
+| AI Files Folder | shared | where the model is kept |
+
+Changes apply right away in singleplayer and LAN worlds. On a dedicated server, edit the server's `config/villagerchatter.properties` (same names, plus `backend`, `hearingRange`, `villagerCooldownSeconds`, `playerCooldownSeconds`, `aiTimeoutMs`).
 
 ## Building
 Requires JDK 25.
@@ -63,8 +82,9 @@ Requires JDK 25.
 - [x] Villager memory, trade and hit reactions, villager small talk
 - [x] Built-in AI (no Ollama needed)
 - [x] World reactions: raids starting/ending, the bell, bedtime
-- [ ] In-game settings screen, bubble size, chattiness slider, "hrmm" sounds
-- [ ] Shared model folder across instances, Modrinth release
+- [x] In-game settings screen, bubble size, chattiness slider, "hrmm" sounds (v0.10)
+- [x] Shared model folder across instances (v0.10)
+- [ ] Modrinth release
 
 See [DESIGN.md](DESIGN.md) for the design notes and the model comparison.
 

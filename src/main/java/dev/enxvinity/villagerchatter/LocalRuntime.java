@@ -11,9 +11,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
@@ -25,7 +28,8 @@ import java.util.stream.Stream;
 /**
  * The built-in AI: no Ollama needed.
  *
- * On first launch it downloads two things into .minecraft/villagerchatter/:
+ * On first launch it downloads two things into a folder shared by all your Minecraft instances
+ * (see {@link #defaultDataDir()}; older versions used .minecraft/villagerchatter/ and those files are moved over):
  *   1. llama.cpp's "llama-server" for this OS (~12-35 MB, from the official GitHub release)
  *   2. the Qwen3-4B model file (~2.5 GB, from Qwen's official Hugging Face page)
  * Both are checked against pinned SHA-256 hashes before use. Then it runs llama-server in the
@@ -52,7 +56,11 @@ public final class LocalRuntime {
 
 	public enum State { IDLE, DOWNLOADING, STARTING, READY, FAILED }
 
+	/** Shared across instances: the model and llama-server. */
 	private Path home;
+	/** Per instance: the log and the PID file (so one instance never stops another's server). */
+	private Path instanceDir;
+	private boolean hookAdded;
 	private final HttpClient web = HttpClient.newBuilder()
 			.followRedirects(HttpClient.Redirect.NORMAL)
 			.proxy(ProxySelector.getDefault())
@@ -84,14 +92,23 @@ public final class LocalRuntime {
 
 	private void run() {
 		try {
-			home = FabricLoader.getInstance().getGameDir().resolve("villagerchatter");
-			Files.createDirectories(home);
+			instanceDir = Files.createDirectories(FabricLoader.getInstance().getGameDir().resolve("villagerchatter"));
+			home = Files.createDirectories(dataDir());
+			VillagerChatter.LOGGER.info("AI files folder: {}", home);
 			killLeftoverServer();
-			Path model = ensureModel();
+			Path model = locked(() -> {
+				moveOldDownloads();
+				return ensureModel();
+			});
 			List<Asset> candidates = assetsForThisComputer();
 			for (int i = 0; i < candidates.size(); i++) {
 				Asset asset = candidates.get(i);
-				Path server = ensureServer(asset);
+				Path server = locked(() -> ensureServer(asset));
+				if (!ChatterConfig.get().aiEnabled) { // turned off in the settings while we were downloading
+					state = State.IDLE;
+					status = "off";
+					return;
+				}
 				state = State.STARTING;
 				if (launch(server, model)) {
 					state = State.READY;
@@ -103,7 +120,7 @@ public final class LocalRuntime {
 				VillagerChatter.LOGGER.warn("llama-server ({}) didn't start{}", asset.file(),
 						i + 1 < candidates.size() ? ", trying the next build…" : ".");
 			}
-			fail("the AI server couldn't start on this computer (see villagerchatter/llama-server.log)");
+			fail("the AI server couldn't start on this computer (see .minecraft/villagerchatter/llama-server.log)");
 		} catch (Exception e) {
 			fail(e.toString());
 		}
@@ -113,6 +130,155 @@ public final class LocalRuntime {
 		state = State.FAILED;
 		status = "failed: " + why;
 		VillagerChatter.LOGGER.warn("Built-in AI unavailable: {}. Villagers will use hand-written lines.", why);
+	}
+
+	// ---------------- Where the files live ----------------
+
+	/**
+	 * One folder for every Minecraft instance, so the 2.5 GB model is only downloaded once:
+	 *   macOS:   ~/Library/Application Support/VillagerChatter
+	 *   Windows: %LOCALAPPDATA%\VillagerChatter
+	 *   Linux:   $XDG_DATA_HOME/villagerchatter (usually ~/.local/share/villagerchatter).
+	 *            Flatpak launchers (Prism on SteamOS) point XDG_DATA_HOME inside their sandbox, which is still shared by all their instances.
+	 */
+	public static Path defaultDataDir() {
+		String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
+		Path userHome = Path.of(System.getProperty("user.home"));
+		if (os.contains("mac")) return userHome.resolve("Library").resolve("Application Support").resolve("VillagerChatter");
+		if (os.contains("win")) {
+			String local = System.getenv("LOCALAPPDATA");
+			return (local != null && !local.isBlank() ? Path.of(local) : userHome.resolve("AppData").resolve("Local")).resolve("VillagerChatter");
+		}
+		String xdg = System.getenv("XDG_DATA_HOME");
+		Path base = xdg != null && !xdg.isBlank() && Path.of(xdg).isAbsolute() ? Path.of(xdg) : userHome.resolve(".local").resolve("share");
+		return base.resolve("villagerchatter");
+	}
+
+	/** The folder in use: the custom one from the settings, or the shared default. */
+	public static Path dataDir() {
+		ChatterConfig c = ChatterConfig.get();
+		String custom = c == null ? "" : c.modelFolder.trim();
+		if (custom.isEmpty()) return defaultDataDir();
+		if (custom.equals("~") || custom.startsWith("~/") || custom.startsWith("~\\")) {
+			custom = System.getProperty("user.home") + custom.substring(1);
+		}
+		return Path.of(custom).toAbsolutePath().normalize();
+	}
+
+	private interface IoTask<T> { T run() throws Exception; }
+
+	/** Only one Minecraft instance downloads or moves files at a time; the others wait, then reuse them. */
+	private <T> T locked(IoTask<T> task) throws Exception {
+		try (FileChannel ch = FileChannel.open(home.resolve(".lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+			FileLock lock = ch.tryLock();
+			if (lock == null) {
+				status = "waiting for another Minecraft window to finish downloading";
+				VillagerChatter.LOGGER.info("Another Minecraft instance is setting up the AI files — waiting for it.");
+				lock = ch.lock();
+			}
+			try {
+				return task.run();
+			} finally {
+				lock.release();
+			}
+		}
+	}
+
+	/**
+	 * Before v0.10 every instance kept its own copy in .minecraft/villagerchatter/. Move those into the shared
+	 * folder instead of downloading again, and delete copies the shared folder already has.
+	 * If a custom folder is set, files in the shared default folder are moved there too.
+	 */
+	private void moveOldDownloads() {
+		moveFrom(instanceDir, true);
+		Path shared = defaultDataDir();
+		if (!sameFile(shared, home)) moveFrom(shared, false);
+	}
+
+	private void moveFrom(Path source, boolean deleteDuplicates) {
+		try {
+			if (!Files.isDirectory(source) || sameFile(source, home)) return;
+			// The model (+ its ".verified" marker).
+			Path oldModel = source.resolve("models").resolve(MODEL_FILE);
+			Path oldOk = source.resolve("models").resolve(MODEL_FILE + ".verified");
+			Path newModels = home.resolve("models");
+			if (Files.exists(oldModel) && Files.exists(oldOk)) {
+				if (Files.exists(newModels.resolve(MODEL_FILE + ".verified"))) {
+					if (deleteDuplicates) {
+						Files.delete(oldModel);
+						Files.delete(oldOk);
+						VillagerChatter.LOGGER.info("Deleted a duplicate copy of the model from {}", source);
+					}
+				} else {
+					status = "moving the villager brain to the shared folder";
+					VillagerChatter.LOGGER.info("Moving the model from {} to {} (no re-download needed)…", source, home);
+					Files.createDirectories(newModels);
+					Files.move(oldModel, newModels.resolve(MODEL_FILE), StandardCopyOption.REPLACE_EXISTING);
+					Files.move(oldOk, newModels.resolve(MODEL_FILE + ".verified"), StandardCopyOption.REPLACE_EXISTING);
+				}
+			}
+			// Unpacked llama-server builds.
+			Path oldRuntime = source.resolve("runtime");
+			if (Files.isDirectory(oldRuntime)) {
+				try (Stream<Path> builds = Files.list(oldRuntime)) {
+					for (Path build : builds.toList()) {
+						if (!Files.exists(build.resolve(".verified"))) continue;
+						Path target = home.resolve("runtime").resolve(build.getFileName().toString());
+						if (Files.exists(target.resolve(".verified"))) {
+							if (deleteDuplicates) deleteTree(build);
+						} else {
+							deleteTree(target); // half-unpacked leftovers
+							Files.createDirectories(target.getParent());
+							moveTree(build, target);
+						}
+					}
+				}
+			}
+			// Tidy up the old folders if they're empty now (the instance folder keeps the log).
+			for (String sub : List.of("models", "runtime", "downloads")) {
+				try {
+					Files.deleteIfExists(source.resolve(sub));
+				} catch (IOException notEmpty) {
+					// leave it
+				}
+			}
+		} catch (Exception e) {
+			// Not fatal: worst case we download again.
+			VillagerChatter.LOGGER.warn("Couldn't move the old AI files from {}: {}", source, e.toString());
+		}
+	}
+
+	private static boolean sameFile(Path a, Path b) {
+		try {
+			return Files.exists(a) && Files.exists(b) ? Files.isSameFile(a, b) : a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
+		} catch (IOException e) {
+			return false;
+		}
+	}
+
+	/** Rename if possible (same drive), otherwise copy then delete. Keeps the "executable" bit. */
+	private static void moveTree(Path from, Path to) throws IOException {
+		try {
+			Files.move(from, to);
+			return;
+		} catch (IOException sameDriveOnly) {
+			// different drive: fall through to copy
+		}
+		try (Stream<Path> walk = Files.walk(from)) {
+			for (Path src : walk.toList()) {
+				Path dst = to.resolve(from.relativize(src).toString());
+				if (Files.isDirectory(src, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectories(dst);
+				else Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+			}
+		}
+		deleteTree(from);
+	}
+
+	private static void deleteTree(Path dir) throws IOException {
+		if (!Files.exists(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return;
+		try (Stream<Path> walk = Files.walk(dir)) {
+			for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(p);
+		}
 	}
 
 	// ---------------- Platform ----------------
@@ -231,12 +397,15 @@ public final class LocalRuntime {
 		pb.environment().merge("LD_LIBRARY_PATH", libDir, (a, b) -> b + java.io.File.pathSeparator + a);
 		pb.environment().merge("DYLD_LIBRARY_PATH", libDir, (a, b) -> b + java.io.File.pathSeparator + a);
 		pb.redirectErrorStream(true);
-		pb.redirectOutput(home.resolve("llama-server.log").toFile());
+		pb.redirectOutput(instanceDir.resolve("llama-server.log").toFile());
 		status = "starting the AI";
 		Process p = pb.start();
 		process = p;
-		Files.writeString(home.resolve("llama-server.pid"), String.valueOf(p.pid()));
-		Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "VillagerChatter-AI-stop"));
+		Files.writeString(instanceDir.resolve("llama-server.pid"), String.valueOf(p.pid()));
+		if (!hookAdded) {
+			hookAdded = true;
+			Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "VillagerChatter-AI-stop"));
+		}
 
 		// Wait up to 2 minutes for the model to load.
 		long deadline = System.currentTimeMillis() + 120_000;
@@ -266,15 +435,24 @@ public final class LocalRuntime {
 			}
 		}
 		try {
-			if (home != null) Files.deleteIfExists(home.resolve("llama-server.pid"));
+			if (instanceDir != null) Files.deleteIfExists(instanceDir.resolve("llama-server.pid"));
 		} catch (IOException ignored) {
 		}
+	}
+
+	/** AI switched off in the settings: stop the server to free its memory. {@link #startAsync()} brings it back. */
+	public synchronized void shutdown() {
+		if (state == State.DOWNLOADING) return; // the download thread checks the setting before starting the server
+		stop();
+		process = null;
+		state = State.IDLE;
+		status = "off";
 	}
 
 	/** If the game crashed last time, the old server may still be running: stop it. */
 	private void killLeftoverServer() {
 		try {
-			Path pid = home.resolve("llama-server.pid");
+			Path pid = instanceDir.resolve("llama-server.pid");
 			if (!Files.exists(pid)) return;
 			long id = Long.parseLong(Files.readString(pid).trim());
 			ProcessHandle.of(id).ifPresent(h -> {

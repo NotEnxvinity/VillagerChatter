@@ -3,11 +3,17 @@
 	"id": "villagerchatter",
 	"version": "${version}",
 	"name": "Villager Chatter",
-	"description": "Villagers say AI-generated, situation-aware lines in speech bubbles, and chat with you in the trading screen.",
+	"description": "Villagers say AI-generated, situation-aware lines in speech bubbles, chat with you in the trading screen, and react to raids, bells and bedtime. Runs a small AI on your own computer, no account or setup.",
 	"authors": [
 		"Enxvinity"
 	],
 	"license": "MIT",
+	"icon": "assets/villagerchatter/icon.png",
+	"contact": {
+		"homepage": "https://modrinth.com/mod/villager-chatter",
+		"sources": "https://github.com/NotEnxvinity/VillagerChatter",
+		"issues": "https://github.com/NotEnxvinity/VillagerChatter/issues"
+	},
 	"environment": "*",
 	"entrypoints": {
 		"main": [
@@ -15,6 +21,9 @@
 		],
 		"client": [
 			"dev.enxvinity.villagerchatter.client.VillagerChatterClient"
+		],
+		"modmenu": [
+			"dev.enxvinity.villagerchatter.compat.ModMenuIntegration"
 		]
 	},
 	"depends": {
@@ -22,6 +31,9 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
 	},
 	"mixins": [
 		"villagerchatter.mixins.json",

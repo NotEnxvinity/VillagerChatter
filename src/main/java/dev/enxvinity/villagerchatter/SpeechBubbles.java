@@ -34,13 +34,15 @@ public final class SpeechBubbles {
 	public void show(ServerLevel level, Villager villager, String line) {
 		remove(villager.getUUID());
 
+		ChatterConfig config = ChatterConfig.get();
+		float scale = 0.6f * (config == null ? 100 : config.bubbleSize) / 100f; // 100% = the original size
 		Display.TextDisplay display = new Display.TextDisplay(EntityTypes.TEXT_DISPLAY, level);
 		((TextDisplayAccessor) display).villagerchatter$setText(Component.literal(line));
 		((TextDisplayAccessor) display).villagerchatter$setLineWidth(140);
 		((TextDisplayAccessor) display).villagerchatter$setBackgroundColor(0xB0000000); // translucent black
 		((DisplayAccessor) display).villagerchatter$setBillboardConstraints(Display.BillboardConstraints.CENTER);
 		((DisplayAccessor) display).villagerchatter$setTransformation(new Transformation(
-				new Vector3f(0, 0, 0), new Quaternionf(), new Vector3f(0.6f, 0.6f, 0.6f), new Quaternionf()));
+				new Vector3f(0, 0, 0), new Quaternionf(), new Vector3f(scale, scale, scale), new Quaternionf()));
 		((DisplayAccessor) display).villagerchatter$setPosRotInterpolationDuration(3); // smooth following
 		display.addTag(TAG);
 		display.setNoGravity(true);

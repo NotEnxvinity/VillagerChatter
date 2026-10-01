@@ -105,6 +105,16 @@ public final class AiLines {
 	public LocalRuntime runtime() {
 		return runtime;
 	}
+
+	/** AI switched on or off in the settings screen. */
+	public void onSettingsChanged() {
+		if (config.aiEnabled) {
+			offlineUntilMs = 0;
+			warmUp(); // does nothing if the built-in AI is already running
+		} else if (builtin()) {
+			runtime.shutdown(); // frees the model's memory (~3 GB)
+		}
+	}
 	/** If Ollama isn't reachable, stop asking for a minute instead of spamming it. */
 	private volatile long offlineUntilMs = 0;
 	private volatile boolean warnedOffline = false;
